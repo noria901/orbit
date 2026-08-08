@@ -180,6 +180,7 @@
   <b>地震</b> USGS Earthquake Hazards（Public Domain）<br>
   <b>気象</b> 気象庁 アメダス（政府標準利用規約）<br>
   <b>地点</b> <a href="https://open-meteo.com/" target="_blank">Weather data by Open-Meteo.com</a>（CC BY 4.0）<br>
+  <b>近接概形</b> 実CADではなく簡略化した代表シルエット(本体+パネル)<br>
   <div id="debugline" class="mono">loading…</div>
 </div>
 
@@ -651,9 +652,96 @@ viewer.clock.onTick.addEventListener(()=>{
   issShown = Cesium.Cartesian3.lerp(issShown, issTarget, 0.06, new Cesium.Cartesian3());
 });
 
+/* ============================================================
+   選択オブジェクトへのフライイン + 近接時の概形表示
+   衛星の正確なCADモデルは存在しない(取得もできない)ので、
+   ここで見せているのは「本体+太陽電池パネル」の簡略化した代表シルエット。
+   ISSだけは実寸に近い比率(全長約109m×パネル展張約73m)にして、
+   汎用衛星(数m級)とスケールで区別がつくようにしている。
+   ============================================================ */
+const shapeDS = new Cesium.CustomDataSource('shape');
+viewer.dataSources.add(shapeDS);
+const NEAR_DIST = 8000; // この距離より近いと概形表示、遠いとドット表示
+
+const selection = { kind:null, pointRef:null, entities:[] };
+
+function clearSelection(){
+  if (selection.pointRef) selection.pointRef.distanceDisplayCondition = undefined;
+  if (selection.kind === 'iss') issEntity.point.distanceDisplayCondition = undefined;
+  selection.entities.forEach(e=>shapeDS.entities.remove(e));
+  selection.entities = [];
+  selection.kind = null; selection.pointRef = null;
+  viewer.trackedEntity = undefined;
+  btnIss.textContent = 'ISS を追う';
+  btnIss.classList.remove('home');
+}
+
+function makeSatPositionProperty(satrec){
+  return new Cesium.CallbackProperty((time, result)=>{
+    try{
+      const jsTime = Cesium.JulianDate.toDate(time);
+      const gmst = satellite.gstime(jsTime);
+      const pv = satellite.propagate(satrec, jsTime);
+      if (pv && pv.position){
+        const ecf = satellite.eciToEcf(pv.position, gmst);
+        return Cesium.Cartesian3.fromElements(ecf.x*1000, ecf.y*1000, ecf.z*1000, result);
+      }
+    }catch(e){}
+    return result || new Cesium.Cartesian3(); // 伝播失敗時もundefinedは返さない
+  }, false);
+}
+
+function addShapeBox(positionProp, orientation, dims, css, alpha){
+  return shapeDS.entities.add({
+    position: positionProp, orientation,
+    box:{ dimensions:dims, material:Cesium.Color.fromCssColorString(css).withAlpha(alpha),
+      outline:true, outlineColor:Cesium.Color.BLACK.withAlpha(0.35),
+      distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0, NEAR_DIST) }
+  });
+}
+
+function selectObject(kind, opts){
+  clearSelection();
+  selection.kind = kind;
+  let positionProp, flyRange, entities = [];
+
+  if (kind === 'iss'){
+    positionProp = issEntity.position;
+    const orientation = new Cesium.VelocityOrientationProperty(positionProp);
+    entities.push(addShapeBox(positionProp, orientation, new Cesium.Cartesian3(109,6,6), '#D8D8D8', 1.0));   // トラス
+    entities.push(addShapeBox(positionProp, orientation, new Cesium.Cartesian3(1.5,73,4), '#1E3A6E', 0.92)); // 太陽電池パネル
+    issEntity.point.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(NEAR_DIST, Number.MAX_VALUE);
+    flyRange = 350;
+  } else if (kind === 'bulkSat'){
+    const idx = opts.index;
+    const satrec = catalogue.satrecs[idx];
+    positionProp = makeSatPositionProperty(satrec);
+    const orientation = new Cesium.VelocityOrientationProperty(positionProp);
+    entities.push(addShapeBox(positionProp, orientation, new Cesium.Cartesian3(2,2,3), '#B8C4D0', 1.0));     // 本体
+    entities.push(addShapeBox(positionProp, orientation, new Cesium.Cartesian3(0.3,18,3), '#2A4E8C', 0.9));  // パネル
+    const pt = catalogue.points.get(idx);
+    pt.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(NEAR_DIST, Number.MAX_VALUE);
+    selection.pointRef = pt;
+    flyRange = 600;
+  } else return;
+
+  const anchor = shapeDS.entities.add({ position: positionProp }); // flyTo/trackedEntityの追従先
+  entities.push(anchor);
+  selection.entities = entities;
+
+  idle = false; fadeHint();
+  viewer.trackedEntity = undefined; // 一度外さないと「追跡中で変化なし」と判定されアニメーションされないことがある
+  viewer.flyTo(anchor, {
+    duration: 2.4,
+    offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(30), Cesium.Math.toRadians(-20), flyRange)
+  }).then(ok=>{ if(ok !== false) viewer.trackedEntity = anchor; });
+
+  if (kind === 'iss'){ btnIss.textContent = '追尾を解除'; btnIss.classList.add('home'); }
+}
+
 /* ---- クリック：エンティティ or 地点プローブ ---- */
 const card = document.getElementById('card'), cardBody = document.getElementById('card-body');
-document.querySelector('#card .x').onclick = ()=> card.style.display='none';
+document.querySelector('#card .x').onclick = ()=> { card.style.display='none'; clearSelection(); };
 function showCard(x,y,html){
   cardBody.innerHTML = html;
   card.style.display='block';
@@ -695,6 +783,7 @@ handler.setInputAction(async (click)=>{
         <div class="cf">この時刻では伝播計算できません（軌道消失の可能性）</div>`;
     }
     showCard(click.position.x, click.position.y, html);
+    selectObject('bulkSat', { index: idx });
     return;
   }
 
@@ -712,8 +801,10 @@ handler.setInputAction(async (click)=>{
         <div class="kv"><span>可視半径</span><b>${Math.round(d.footprint/2).toLocaleString()} km</b></div>
         <div class="kv"><span>日照</span><b>${d.visibility==='daylight'?'昼':'夜'}</b></div>
         <div class="cf">実測位置 ・ wheretheiss.at</div>` : '<div class="ct">取得中…</div>');
+      if (issShown) selectObject('iss', {});
       return;
     }
+    clearSelection();
     if (kind === 'quake'){
       const dep = p.depth.getValue();
       showCard(click.position.x, click.position.y, `
@@ -736,6 +827,7 @@ handler.setInputAction(async (click)=>{
     return;
   }
   // 地表を突いた → Open-Meteo プローブ（0.01°丸めでキャッシュ、標高は永続・localStorageミラー）
+  clearSelection();
   const carte = camera.pickEllipsoid(click.position, scene.globe.ellipsoid);
   if(!carte){ card.style.display='none'; return; }
   const cg = Cesium.Cartographic.fromCartesian(carte);
@@ -816,17 +908,13 @@ document.querySelector('.jbtn.home').onclick = ()=>{
 };
 const btnIss = document.getElementById('btn-iss');
 btnIss.onclick = ()=>{
-  if(viewer.trackedEntity === issEntity){
-    viewer.trackedEntity = undefined;
-    btnIss.textContent = 'ISS を追う';
-    btnIss.classList.remove('home');
+  if(viewer.trackedEntity){
+    clearSelection();
     return;
   }
   if(!issShown){ btnIss.textContent = '位置取得中…'; return; }
-  idle = false; card.style.display='none';
-  viewer.trackedEntity = issEntity;
-  btnIss.textContent = '追尾を解除';
-  btnIss.classList.add('home');
+  card.style.display='none';
+  selectObject('iss', {});
 };
 
 document.querySelectorAll('.jbtn[data-lon]').forEach(b=>{
