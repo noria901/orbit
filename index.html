@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ORBIT — 地球観測</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.114.0/Widgets/widgets.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.114.0/Cesium.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/satellite.js/4.0.0/satellite.min.js"></script>
@@ -243,10 +244,15 @@ const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
    上層: NASA GIBS MODIS Terra 真色画像（実際の雲入り、ほぼ毎日更新）
    上層のタイルが欠損している場所は下地のBlue Marbleがそのまま透けて見えるので、
    「常に破綻しない下地」の上に「その日の実況」を重ねるフェイルセーフ構成になっている。
-   最新日は極域の夜側などでモザイク欠損が出ることがあるため、上層はUTC前日を指定。 */
+
+   NASA公式ブログ曰く「衛星は東から西へ軌道を回りながら撮影するため、
+   当日UTC分のタイルの多くはまだ空」とのことで、UTC前日を指定しても
+   東経側(日本を含む)がまだ欠けていることがある(400 Bad Requestで判明)。
+   そのため2日前まで安全マージンを取り、かつ欠損自体は仕様通りの挙動なので
+   Cesiumの既定のコンソールエラー出力は黙らせて自前で1行だけ状況を出す。 */
 (function addGibsTrueColorLayer(){
   try{
-    const d = new Date(Date.now() - 86400000); // UTC前日（当日はモザイクが完成していない領域が出るため）
+    const d = new Date(Date.now() - 2*86400000); // UTC2日前（東経側の欠損に対する安全マージン）
     const dateStr = d.toISOString().slice(0,10);
     const gibs = new Cesium.WebMapTileServiceImageryProvider({
       url: `https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${dateStr}/250m/{TileMatrix}/{TileRow}/{TileCol}.jpg`,
@@ -257,6 +263,15 @@ const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
       tilingScheme: new Cesium.GeographicTilingScheme(),
       maximumLevel: 8, // NASA公式(nasa-gibs/gibs-ml)のレベル対応表で250mセットの実在最大は level 8。公式wikiのTILEMATRIX=6実例とも整合
       credit: new Cesium.Credit('NASA EOSDIS GIBS / MODIS Terra Corrected Reflectance (' + dateStr + ')')
+    });
+    let gibsMissCount = 0;
+    gibs.errorEvent.addEventListener(()=>{
+      // 特定タイルの欠損はGIBSの仕様上ありえる想定内の状態(下地のBlue Marbleが透けて見える)。
+      // ここでlistenerを持たせること自体がCesium既定の大量console.error出力を抑止する。
+      gibsMissCount++;
+      if (gibsMissCount === 1 || gibsMissCount % 50 === 0){
+        console.info(`[orbit] GIBS実写: 一部タイル欠損(${gibsMissCount}件, 下地Blue Marbleで代替表示中)`);
+      }
     });
     viewer.imageryLayers.addImageryProvider(gibs);
     console.info('[orbit] GIBS実写(雲入り)レイヤをBlue Marble上に追加:', dateStr);
