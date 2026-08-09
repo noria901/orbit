@@ -218,7 +218,9 @@ Cesium.Ion.defaultAccessToken = undefined;
 
 const viewer = new Cesium.Viewer('globe', {
   imageryProvider: new Cesium.WebMapTileServiceImageryProvider({
-    url: 'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/wmts.cgi', // KVP方式(日付不要の静的レイヤ)
+    // REST方式。BlueMarbleは静的レイヤなので{Time}セグメントは無く、defaultの直後にTileMatrixSetが来る
+    // (KVP方式だとTileMatrixラベルの解釈がサーバー実装依存でずれることがあり、実際に空白/ブロック状になる不具合が出た)
+    url: 'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/BlueMarble_NextGeneration/default/500m/{TileMatrix}/{TileRow}/{TileCol}.jpg',
     layer: 'BlueMarble_NextGeneration',
     style: 'default',
     format: 'image/jpeg',
