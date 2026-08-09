@@ -224,7 +224,7 @@ const viewer = new Cesium.Viewer('globe', {
     format: 'image/jpeg',
     tileMatrixSetID: '500m',
     tilingScheme: new Cesium.GeographicTilingScheme(),
-    maximumLevel: 8,
+    maximumLevel: 5, // 500mタイルマトリクスセットの実在最大レベル(8だと存在しないタイルを要求し404で空白になる)
     credit: new Cesium.Credit('NASA EOSDIS GIBS / Blue Marble Next Generation')
   }),
   baseLayerPicker:false, geocoder:false, homeButton:false, sceneModePicker:false,
@@ -252,7 +252,7 @@ const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
       format: 'image/jpeg',
       tileMatrixSetID: '250m',
       tilingScheme: new Cesium.GeographicTilingScheme(),
-      maximumLevel: 8,
+      maximumLevel: 5, // Cesium公式GIBSサンプル準拠。8だと存在しないレベルで404、地上付近が空白になっていた
       credit: new Cesium.Credit('NASA EOSDIS GIBS / MODIS Terra Corrected Reflectance (' + dateStr + ')')
     });
     viewer.imageryLayers.addImageryProvider(gibs);
