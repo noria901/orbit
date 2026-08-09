@@ -389,7 +389,7 @@ function renderQuakes(gj){
         outlineColor: col, outlineWidth: 1.4,
         scaleByDistance:new Cesium.NearFarScalar(3e5,1.9, 2.5e7,0.65),
         translucencyByDistance:new Cesium.NearFarScalar(3e5,1.0, 4e7,0.6),
-        disableDepthTestDistance:Number.POSITIVE_INFINITY
+        disableDepthTestDistance: 10000 // 10km以内(地上での接写)のみ深度テスト無効。それ以遠は地球儀に正しく遮蔽される
       },
       properties:{ kind:'quake', mag:m, depth:dep, place:f.properties.place, time:f.properties.time }
     });
@@ -439,7 +439,7 @@ function renderAmedas(obs, stamp){
         outlineColor:Cesium.Color.fromCssColorString('#05070C').withAlpha(0.7), outlineWidth:0.8,
         scaleByDistance:new Cesium.NearFarScalar(5e4,1.6, 3e6,0.35),
         translucencyByDistance:new Cesium.NearFarScalar(5e4,1.0, 5e6,0.0),
-        disableDepthTestDistance:Number.POSITIVE_INFINITY
+        disableDepthTestDistance: 10000 // 10km以内のみ深度テスト無効。それ以遠は地球儀に正しく遮蔽される
       },
       properties:{ kind:'amedas', name:meta.kjName||id, temp:t,
         wind:(v.wind&&v.wind[1]===0)?v.wind[0]:null,
