@@ -669,9 +669,13 @@ const issOrientation = new Cesium.CallbackProperty((time, result)=>{
     issShown, new Cesium.HeadingPitchRoll(issHeading, 0, 0), Cesium.Ellipsoid.WGS84, undefined, result);
 }, false);
 
+// 常にissShown(tickハンドラが Date.now() 基準で計算した唯一の正)を返すだけにする。
+// 以前は呼ばれるたびに issPositionAt() で再計算していたが、追従カメラ側は
+// viewer.clock.currentTime を、表示側は Date.now() を基準にしていて、
+// 秒速7.66kmの相手だとこの2つの時刻ソースのわずかなズレが接写時に
+// 数十m級のガタつきとして見えてしまっていた。単一の値を両方が参照する形にして解消。
 const issPositionProp = new Cesium.CallbackProperty((time, result)=>{
-  const t = time ? Cesium.JulianDate.toDate(time).getTime() : Date.now();
-  return issPositionAt(t, result) || issShown || result;
+  return issShown ? Cesium.Cartesian3.clone(issShown, result) : undefined;
 }, false);
 
 const issEntity = issDS.entities.add({
@@ -774,6 +778,7 @@ function clearSelection(){
   selection.kind = null; selection.pointRef = null;
   followTarget = null; followLastPos = null; // 自前追従カメラを停止
   viewer.trackedEntity = undefined;
+  if (catalogue.points && !groundMode) catalogue.points.show = true; // 接写用に隠していた衛星群を復元
   btnIss.textContent = 'ISS を追う';
   btnIss.classList.remove('home');
 }
@@ -846,6 +851,7 @@ function selectObject(kind, opts){
   clearSelection();
   selection.kind = kind;
   let positionProp, flyRange, entities = [];
+  if (catalogue.points) catalogue.points.show = false; // 接写中は見えないので描画負荷を落とす
 
   if (kind === 'iss'){
     positionProp = issEntity.position;
@@ -880,8 +886,9 @@ function selectObject(kind, opts){
   // ISSは秒速7.66km、衛星群も高速で動くため、静止した1点をめがけて2.4秒かけて
   // 飛ぶと、到着した頃には対象は数km〜十数km先へ進んでしまい追いつけなくなる。
   const FLY_DURATION = 2.4;
-  const futureTime = Cesium.JulianDate.addSeconds(viewer.clock.currentTime, FLY_DURATION, new Cesium.JulianDate());
-  const startPos = positionProp.getValue(futureTime) || positionProp.getValue(viewer.clock.currentTime);
+  const startPos = kind === 'iss'
+    ? (issPositionAt(Date.now() + FLY_DURATION*1000) || issShown)
+    : positionProp.getValue(Cesium.JulianDate.addSeconds(viewer.clock.currentTime, FLY_DURATION, new Cesium.JulianDate()));
   if (startPos){
     camera.flyToBoundingSphere(new Cesium.BoundingSphere(startPos, 50), {
       duration: FLY_DURATION,
