@@ -198,6 +198,7 @@
 <div id="jump">
   <button class="jbtn home">◎ 地球全体</button>
   <button class="jbtn" id="btn-iss">ISS を追う</button>
+  <button class="jbtn" id="btn-here">📍 現在地</button>
   <button class="jbtn" data-lon="136.91" data-lat="35.18" data-h="90000">名古屋</button>
   <button class="jbtn" data-lon="139.77" data-lat="35.68" data-h="90000">東京</button>
   <button class="jbtn" data-lon="138.73" data-lat="35.36" data-h="55000">富士山</button>
@@ -1030,6 +1031,32 @@ document.querySelectorAll('.jbtn[data-lon]').forEach(b=>{
       orientation:{heading:0, pitch:Cesium.Math.toRadians(-52), roll:0}, duration:3.0 });
   };
 });
+
+const btnHere = document.getElementById('btn-here');
+btnHere.onclick = ()=>{
+  if (!navigator.geolocation){
+    btnHere.textContent = '非対応';
+    setTimeout(()=>btnHere.textContent='📍 現在地', 2000);
+    return;
+  }
+  btnHere.textContent = '取得中…';
+  navigator.geolocation.getCurrentPosition(
+    (pos)=>{
+      btnHere.textContent = '📍 現在地';
+      card.style.display='none'; clearSelection(); idle=false;
+      camera.flyTo({
+        destination:Cesium.Cartesian3.fromDegrees(
+          pos.coords.longitude, pos.coords.latitude - 0.35, 90000),
+        orientation:{heading:0, pitch:Cesium.Math.toRadians(-52), roll:0}, duration:3.0 });
+    },
+    (err)=>{
+      console.warn('[orbit] 位置情報の取得に失敗', err);
+      btnHere.textContent = err.code===1 ? '許可が必要' : '取得失敗';
+      setTimeout(()=>btnHere.textContent='📍 現在地', 2500);
+    },
+    { enableHighAccuracy:false, timeout:10000, maximumAge:300000 }
+  );
+};
 
 /* ---- 観測ループ ----
    起動直後はlocalStorageに前回結果があれば即座に復元描画（ネットワーク待ちなし）。
