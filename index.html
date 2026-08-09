@@ -642,8 +642,9 @@ setInterval(()=>{ if(tabVisible) loadCatalogue(); }, TLE_TTL); // Actionsの更�
 /* ============================================================
    ISS：実測位置（wheretheiss.at, 認証不要）
    ============================================================ */
-let issTarget = null, issShown = null, issMeta = null;
+let issShown = null, issMeta = null;
 let issHeading = 0, issPrevLat = null, issPrevLon = null; // 実測lat/lonの差分から進行方位(bearing)を算出
+let issFixTime = null, issFixLat = null, issFixLon = null, issFixAlt = null, issSpeedKmh = 0; // 直近の実測値(推測航法の起点)
 
 // ISSの向き。issShownは時刻の関数ではなく外部ポーリングで書き換わる値なので
 // VelocityOrientationPropertyでは速度を検出できない → 実測lat/lonの逐次差分から
@@ -692,8 +693,9 @@ async function pollISS(){
       if (Math.hypot(y,x) > 1e-9) issHeading = Math.atan2(y, x); // 大圏方位(forward azimuth)
     }
     issPrevLat = d.latitude; issPrevLon = d.longitude;
-    issTarget = Cesium.Cartesian3.fromDegrees(d.longitude, d.latitude, d.altitude*1000);
-    if(!issShown) issShown = issTarget.clone();
+    issFixTime = Date.now(); issFixLat = d.latitude; issFixLon = d.longitude; issFixAlt = d.altitude;
+    issSpeedKmh = d.velocity;
+    if(!issShown) issShown = Cesium.Cartesian3.fromDegrees(d.longitude, d.latitude, d.altitude*1000);
     const r = d.footprint*1000/2;
     issRing.ellipse.semiMajorAxis = r;
     issRing.ellipse.semiMinorAxis = r;
@@ -711,11 +713,20 @@ async function pollISS(){
 }
 pollISS();
 
-// ポーリング間はなめらかに補間。選択中かつ実モデル読込済みなら、近接時にモデルへ差し替える。
+// ポーリング間は実測速度+進行方位から大圏航法で推測航行し、なめらかに連続移動させる
+// (単純なlerpだと「新しい実測値へ素早く追いつき、その後静止」を繰り返しカクついて見える)。
+// 選択中かつ実モデル読込済みなら、近接時にモデルへ差し替える。
+const ISS_R = 6371 + 408; // 平均軌道半径(km)。地表半径ではなくISS高度分を足したもの
 viewer.clock.onTick.addEventListener(()=>{
-  if(!issTarget) return;
-  if(!issShown){ issShown = issTarget.clone(); return; }
-  issShown = Cesium.Cartesian3.lerp(issShown, issTarget, 0.06, new Cesium.Cartesian3());
+  if (issFixTime == null) return;
+  const dtH = (Date.now() - issFixTime) / 3600000; // 経過時間(時)
+  const distKm = issSpeedKmh * dtH;
+  const δ = distKm / ISS_R; // 移動角距離(rad)
+  const φ1 = issFixLat*Math.PI/180, λ1 = issFixLon*Math.PI/180, θ = issHeading;
+  const φ2 = Math.asin(Math.sin(φ1)*Math.cos(δ) + Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
+  const λ2 = λ1 + Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1), Math.cos(δ) - Math.sin(φ1)*Math.sin(φ2));
+  issShown = Cesium.Cartesian3.fromDegrees(
+    λ2*180/Math.PI, φ2*180/Math.PI, issFixAlt*1000, undefined, issShown || undefined);
 
   if (issModel && issModelState === 'ready'){
     const showModel = selection.kind === 'iss' &&
@@ -750,10 +761,28 @@ function clearSelection(){
   selection.entities.forEach(e=>shapeDS.entities.remove(e));
   selection.entities = [];
   selection.kind = null; selection.pointRef = null;
+  followTarget = null; followLastPos = null; // 自前追従カメラを停止
   viewer.trackedEntity = undefined;
   btnIss.textContent = 'ISS を追う';
   btnIss.classList.remove('home');
 }
+
+// 自前の追従カメラ：対象の位置が1フレームで動いた分だけカメラも同じ量だけ平行移動させる。
+// Cesium標準のtrackedEntityは「追加直後のエンティティ」や外部ポーリング駆動のCallbackPropertyとの
+// 相性が悪く安定して追従しないことがあったため、こちらの単純なdelta追従に切り替えた。
+let followTarget = null, followLastPos = null;
+scene.postUpdate.addEventListener(()=>{
+  if (!followTarget) return;
+  const pos = followTarget.getValue(viewer.clock.currentTime);
+  if (!pos) return;
+  if (followLastPos){
+    const delta = Cesium.Cartesian3.subtract(pos, followLastPos, new Cesium.Cartesian3());
+    if (Cesium.Cartesian3.magnitudeSquared(delta) > 1e-6){
+      camera.position = Cesium.Cartesian3.add(camera.position, delta, camera.position);
+    }
+  }
+  followLastPos = Cesium.Cartesian3.clone(pos, followLastPos);
+});
 
 function makeSatPositionProperty(satrec){
   return new Cesium.CallbackProperty((time, result)=>{
@@ -827,12 +856,9 @@ function selectObject(kind, opts){
     flyRange = 600;
   } else return;
 
-  const anchor = shapeDS.entities.add({ position: positionProp }); // trackedEntityの追従先
-  entities.push(anchor);
   selection.entities = entities;
 
   idle = false; fadeHint();
-  viewer.trackedEntity = undefined; // 一度外さないと「追跡中で変化なし」と判定されアニメーションされないことがある
 
   // 追加直後のエンティティはCesium内部でまだバウンディングスフィアが計算されておらず
   // (次のレンダーフレームまでPENDING状態)、見た目(point/box等)も無いため
@@ -843,10 +869,10 @@ function selectObject(kind, opts){
     camera.flyToBoundingSphere(new Cesium.BoundingSphere(startPos, 50), {
       duration: 2.4,
       offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(30), Cesium.Math.toRadians(-20), flyRange),
-      complete: ()=>{ viewer.trackedEntity = anchor; }
+      complete: ()=>{ followTarget = positionProp; followLastPos = null; }
     });
   } else {
-    viewer.trackedEntity = anchor; // 位置が即座に取れない場合はフライインを諦めて追跡だけ開始
+    followTarget = positionProp; followLastPos = null; // 位置が即座に取れない場合はフライインを諦めて追従だけ開始
   }
 
   if (kind === 'iss'){ btnIss.textContent = '追尾を解除'; btnIss.classList.add('home'); }
@@ -1025,7 +1051,7 @@ document.querySelector('.jbtn.home').onclick = ()=>{
 };
 const btnIss = document.getElementById('btn-iss');
 btnIss.onclick = ()=>{
-  if(viewer.trackedEntity){
+  if(followTarget){
     clearSelection();
     return;
   }
