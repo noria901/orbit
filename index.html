@@ -227,7 +227,7 @@ const viewer = new Cesium.Viewer('globe', {
     format: 'image/jpeg',
     tileMatrixSetID: '500m',
     tilingScheme: new Cesium.GeographicTilingScheme(),
-    maximumLevel: 5, // 500mタイルマトリクスセットの実在最大レベル(8だと存在しないタイルを要求し404で空白になる)
+    maximumLevel: 7, // NASA公式(nasa-gibs/gibs-ml)のレベル対応表で500mセットの実在最大は level 7
     credit: new Cesium.Credit('NASA EOSDIS GIBS / Blue Marble Next Generation')
   }),
   baseLayerPicker:false, geocoder:false, homeButton:false, sceneModePicker:false,
@@ -239,7 +239,7 @@ const viewer = new Cesium.Viewer('globe', {
 const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
 
 /* ---- 地球テクスチャ：2層構成 ----
-   下地: NASA Blue Marble Next Generation（雲なし・常設・静的な合成写真。KVP方式なので日付指定不要）
+   下地: NASA Blue Marble Next Generation（雲なし・常設・静的な合成写真。REST方式・時刻指定不要）
    上層: NASA GIBS MODIS Terra 真色画像（実際の雲入り、ほぼ毎日更新）
    上層のタイルが欠損している場所は下地のBlue Marbleがそのまま透けて見えるので、
    「常に破綻しない下地」の上に「その日の実況」を重ねるフェイルセーフ構成になっている。
@@ -255,7 +255,7 @@ const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
       format: 'image/jpeg',
       tileMatrixSetID: '250m',
       tilingScheme: new Cesium.GeographicTilingScheme(),
-      maximumLevel: 5, // Cesium公式GIBSサンプル準拠。8だと存在しないレベルで404、地上付近が空白になっていた
+      maximumLevel: 8, // NASA公式(nasa-gibs/gibs-ml)のレベル対応表で250mセットの実在最大は level 8。公式wikiのTILEMATRIX=6実例とも整合
       credit: new Cesium.Credit('NASA EOSDIS GIBS / MODIS Terra Corrected Reflectance (' + dateStr + ')')
     });
     viewer.imageryLayers.addImageryProvider(gibs);
