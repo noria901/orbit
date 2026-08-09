@@ -42,7 +42,15 @@
   /* ---- 右上レイヤ ---- */
   #layers{position:absolute;right:14px;top:14px;z-index:10;
     background:var(--glass);border:1px solid var(--line);border-radius:4px;
-    backdrop-filter:blur(10px);overflow:hidden;width:198px}
+    backdrop-filter:blur(10px);overflow:hidden;width:198px;
+    max-height:70vh;overflow-y:auto}
+  #layers-head{position:sticky;top:0;padding:9px 11px;font-size:10px;letter-spacing:.24em;
+    color:var(--ion);cursor:pointer;display:flex;justify-content:space-between;align-items:center;
+    background:var(--glass);border-bottom:1px solid var(--line)}
+  #layers-chevron{transition:transform .2s;color:var(--dim)}
+  #layers.collapsed #layers-body{display:none}
+  #layers.collapsed #layers-head{border-bottom:none}
+  #layers:not(.collapsed) #layers-chevron{transform:rotate(90deg)}
   .lyr{display:flex;align-items:center;gap:9px;padding:9px 11px;cursor:pointer;
     border-bottom:1px solid var(--line);transition:background .15s;font-size:12px}
   .lyr:last-child{border-bottom:none}
@@ -150,7 +158,9 @@
   <span class="v mono" id="t-c">--:--:--</span>
 </div>
 
-<div id="layers">
+<div id="layers" class="collapsed">
+  <div id="layers-head" class="mono">レイヤ <span id="layers-chevron">▸</span></div>
+  <div id="layers-body">
   <div class="grp mono">軌道上</div>
   <div class="lyr on" data-k="iss"><span class="sw"></span><span class="n">ISS <span class="tag live">実測</span></span><span class="c mono" id="c-iss">–</span></div>
   <div class="lyr on" data-k="qzss"><span class="sw"></span><span class="n">みちびき</span><span class="c mono" id="c-qzss">–</span></div>
@@ -170,6 +180,7 @@
   <div class="lyr on" data-k="amedas"><span class="sw"></span><span class="n">アメダス実況</span><span class="c mono" id="c-amedas">–</span></div>
   <div class="lyr on" data-k="night"><span class="sw"></span><span class="n">昼夜境界</span><span class="c mono">live</span></div>
   <div class="lyr off" data-k="terrain"><span class="sw"></span><span class="n">地形起伏</span><span class="c mono">3D</span></div>
+  </div>
 </div>
 
 <div id="src">
@@ -959,6 +970,10 @@ handler.setInputAction(async (click)=>{
 
 /* ---- レイヤ切替 ---- */
 let terrainOn = false;
+document.getElementById('layers-head').onclick = ()=>{
+  document.getElementById('layers').classList.toggle('collapsed');
+};
+
 document.querySelectorAll('.lyr').forEach(el=>{
   el.onclick = async ()=>{
     const k = el.dataset.k;
@@ -1018,6 +1033,27 @@ document.querySelectorAll('.jbtn[data-lon]').forEach(b=>{
    起動直後はlocalStorageに前回結果があれば即座に復元描画（ネットワーク待ちなし）。
    その後は30秒ごとのハートビートで、実際にfetchするかは loadQuakes/loadAmedas
    内部が backoff 間隔を見て自己判断する。タブ非表示時は tabVisible=false で即return。 */
+/* ============================================================
+   地上モード：カメラ高度が低いときは軌道上レイヤをまとめて隠す
+   個別のレイヤON/OFF状態(catalogue.points内の各点、issDS等)は
+   一切変更せず、DataSource/Collection単位のshowだけを一時的に
+   落とすので、地上を離れればユーザーが選んでいた表示状態に戻る。
+   ============================================================ */
+const GROUND_ALT = 150000; // これより低い高度(m)は「地上」とみなす
+let groundMode = false;
+function updateGroundMode(){
+  const h = camera.positionCartographic.height;
+  const shouldGround = h < GROUND_ALT;
+  if (shouldGround === groundMode) return;
+  groundMode = shouldGround;
+  const show = !groundMode;
+  if (catalogue.points) catalogue.points.show = show;
+  issDS.show = show;
+  trackDS.show = show;
+  shapeDS.show = show;
+}
+scene.postRender.addEventListener(updateGroundMode);
+
 restoreQuakesFromCache();
 restoreAmedasFromCache();
 function observeAll(){ loadQuakes(); loadAmedas(); }
