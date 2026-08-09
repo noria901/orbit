@@ -16,6 +16,14 @@ CesiumJS + 実測/計算を明示的に区別する観測レイヤ群。
 | 地点プローブ | 実測 | [Open-Meteo](https://open-meteo.com/)(CC BY 4.0) | クリック時、0.01°丸めで10分キャッシュ |
 | 基図 | — | Cesium同梱 Natural Earth II(Public Domain) | 静的 |
 
+## 選択時のフライイン + 近接概形
+
+ISSまたはカタログ衛星をクリックすると、カメラがその対象へ2.4秒かけて接近し、以後は対象の動きに追従する。
+8,000mより近づくとドット表示から立体形状に切り替わる:
+
+- **ISS**: 選択と同時に[NASA VTAD制作の実glTFモデル](https://science.nasa.gov/resource/international-space-station-3d-model/)(約42MB、Public Domain)を遅延読み込み。読み込み完了までと、CORS等で失敗した場合は実寸比の代表ボックス形状(全長109m×パネル展張73m)で継続表示。姿勢は実測lat/lonの逐次差分から算出した進行方位(forward azimuth)で決定。
+- **カタログ衛星**: 個体ごとの正確なCADモデルは存在しないため、本体(2m級)+太陽電池パネルの簡略化した代表シルエットを表示。進行方向はSGP4伝播から得た速度ベクトルで自動配向。
+
 ## なぜ CelesTrak を直接ブラウザから叩かないか
 
 CelesTrak の `gp.php` エンドポイントは CORS ヘッダーを返さない(確認済み: `Access-Control-Allow-Origin` なし)。
