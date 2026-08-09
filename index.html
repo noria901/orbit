@@ -776,28 +776,34 @@ function clearSelection(){
   selection.entities.forEach(e=>shapeDS.entities.remove(e));
   selection.entities = [];
   selection.kind = null; selection.pointRef = null;
-  followTarget = null; followLastPos = null; // 自前追従カメラを停止
+  trackedSatrec = null;
   viewer.trackedEntity = undefined;
   if (catalogue.points && !groundMode) catalogue.points.show = true; // 接写用に隠していた衛星群を復元
   btnIss.textContent = 'ISS を追う';
   btnIss.classList.remove('home');
 }
 
-// 自前の追従カメラ：対象の位置が1フレームで動いた分だけカメラも同じ量だけ平行移動させる。
-// Cesium標準のtrackedEntityは「追加直後のエンティティ」や外部ポーリング駆動のCallbackPropertyとの
-// 相性が悪く安定して追従しないことがあったため、こちらの単純なdelta追従に切り替えた。
-let followTarget = null, followLastPos = null;
-scene.postUpdate.addEventListener(()=>{
-  if (!followTarget) return;
-  const pos = followTarget.getValue(viewer.clock.currentTime);
-  if (!pos) return;
-  if (followLastPos){
-    const delta = Cesium.Cartesian3.subtract(pos, followLastPos, new Cesium.Cartesian3());
-    if (Cesium.Cartesian3.magnitudeSquared(delta) > 1e-6){
-      camera.position = Cesium.Cartesian3.add(camera.position, delta, camera.position);
-    }
-  }
-  followLastPos = Cesium.Cartesian3.clone(pos, followLastPos);
+// 衛星カタログ用の「常設」追跡アンカー。trackedEntityは内部でカメラのtransformを
+// 毎フレーム対象の位置に更新し続ける(＝真の意味でのカメラの子オブジェクト化)ため、
+// 自前でcamera.positionを差分移動させるより正しく安定する。ただし対象が
+// 「追加された直後のエンティティ」だとバウンディングスフィア計算が間に合わず
+// うまく機能しないことがあるため、ページ読み込み時から存在する常設のエンティティを
+// 1個だけ用意し、追跡したい衛星が変わったら中身(trackedSatrec)だけ差し替える。
+let trackedSatrec = null;
+const satTrackEntity = shapeDS.entities.add({
+  position: new Cesium.CallbackProperty((time, result)=>{
+    if (!trackedSatrec) return undefined;
+    try{
+      const jsTime = Cesium.JulianDate.toDate(time);
+      const gmst = satellite.gstime(jsTime);
+      const pv = satellite.propagate(trackedSatrec, jsTime);
+      if (pv && pv.position){
+        const ecf = satellite.eciToEcf(pv.position, gmst);
+        return Cesium.Cartesian3.fromElements(ecf.x*1000, ecf.y*1000, ecf.z*1000, result);
+      }
+    }catch(e){}
+    return result;
+  }, false)
 });
 
 function makeSatPositionProperty(satrec){
@@ -863,6 +869,7 @@ function selectObject(kind, opts){
   } else if (kind === 'bulkSat'){
     const idx = opts.index;
     const satrec = catalogue.satrecs[idx];
+    trackedSatrec = satrec; // 常設アンカーが追う中身をこの衛星に差し替える
     positionProp = makeSatPositionProperty(satrec);
     const orientation = new Cesium.VelocityOrientationProperty(positionProp);
     entities.push(addShapeBox(positionProp, orientation, new Cesium.Cartesian3(2,2,3), '#B8C4D0', 1.0));     // 本体
@@ -893,10 +900,10 @@ function selectObject(kind, opts){
     camera.flyToBoundingSphere(new Cesium.BoundingSphere(startPos, 50), {
       duration: FLY_DURATION,
       offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(30), Cesium.Math.toRadians(-20), flyRange),
-      complete: ()=>{ followTarget = positionProp; followLastPos = null; }
+      complete: ()=>{ viewer.trackedEntity = (kind === 'iss') ? issEntity : satTrackEntity; }
     });
   } else {
-    followTarget = positionProp; followLastPos = null; // 位置が即座に取れない場合はフライインを諦めて追従だけ開始
+    viewer.trackedEntity = (kind === 'iss') ? issEntity : satTrackEntity; // 位置が即座に取れない場合はフライインを諦めて追跡だけ開始
   }
 
   if (kind === 'iss'){ btnIss.textContent = '追尾を解除'; btnIss.classList.add('home'); }
@@ -1075,7 +1082,7 @@ document.querySelector('.jbtn.home').onclick = ()=>{
 };
 const btnIss = document.getElementById('btn-iss');
 btnIss.onclick = ()=>{
-  if(followTarget){
+  if(viewer.trackedEntity){
     clearSelection();
     return;
   }
