@@ -645,18 +645,37 @@ setInterval(()=>{ if(tabVisible) loadCatalogue(); }, TLE_TTL); // Actionsの更�
 let issShown = null, issMeta = null;
 let issHeading = 0, issPrevLat = null, issPrevLon = null; // 実測lat/lonの差分から進行方位(bearing)を算出
 let issFixTime = null, issFixLat = null, issFixLon = null, issFixAlt = null, issSpeedKmh = 0; // 直近の実測値(推測航法の起点)
+const ISS_R = 6371 + 408; // 平均軌道半径(km)。地表半径ではなくISS高度分を足したもの
 
-// ISSの向き。issShownは時刻の関数ではなく外部ポーリングで書き換わる値なので
-// VelocityOrientationPropertyでは速度を検出できない → 実測lat/lonの逐次差分から
-// 大圏方位(forward azimuth)を計算し、それを姿勢として使う。
+// ISSの位置を「任意時刻(過去/未来問わず)」の関数として計算する純粋関数。
+// fly-toで「今の位置」ではなく「到着予定時刻の予測位置」に飛べるようにするため、
+// 単なる状態変数ではなく時刻引数を受け取る形にしてある(秒速7.66kmで動く相手に
+// 静止点めがけて飛ぶと、着いた頃には対象はとっくに先へ進んでしまうため)。
+function issPositionAt(dateMs, result){
+  if (issFixTime == null) return undefined;
+  const dtH = (dateMs - issFixTime) / 3600000;
+  const distKm = issSpeedKmh * dtH;
+  const δ = distKm / ISS_R;
+  const φ1 = issFixLat*Math.PI/180, λ1 = issFixLon*Math.PI/180, θ = issHeading;
+  const φ2 = Math.asin(Math.sin(φ1)*Math.cos(δ) + Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
+  const λ2 = λ1 + Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1), Math.cos(δ) - Math.sin(φ1)*Math.sin(φ2));
+  return Cesium.Cartesian3.fromDegrees(λ2*180/Math.PI, φ2*180/Math.PI, issFixAlt*1000, undefined, result);
+}
+
+// ISSの向き。実測lat/lonの逐次差分から大圏方位(forward azimuth)を計算し、それを姿勢として使う。
 const issOrientation = new Cesium.CallbackProperty((time, result)=>{
   if (!issShown) return undefined;
   return Cesium.Transforms.headingPitchRollQuaternion(
     issShown, new Cesium.HeadingPitchRoll(issHeading, 0, 0), Cesium.Ellipsoid.WGS84, undefined, result);
 }, false);
 
+const issPositionProp = new Cesium.CallbackProperty((time, result)=>{
+  const t = time ? Cesium.JulianDate.toDate(time).getTime() : Date.now();
+  return issPositionAt(t, result) || issShown || result;
+}, false);
+
 const issEntity = issDS.entities.add({
-  position: new Cesium.CallbackProperty(()=> issShown, false),
+  position: issPositionProp,
   point:{ pixelSize:9, color:Cesium.Color.WHITE,
     outlineColor:Cesium.Color.WHITE.withAlpha(0.3), outlineWidth:8,
     scaleByDistance:new Cesium.NearFarScalar(5e5,1.6, 5e7,0.7) },
@@ -695,7 +714,7 @@ async function pollISS(){
     issPrevLat = d.latitude; issPrevLon = d.longitude;
     issFixTime = Date.now(); issFixLat = d.latitude; issFixLon = d.longitude; issFixAlt = d.altitude;
     issSpeedKmh = d.velocity;
-    if(!issShown) issShown = Cesium.Cartesian3.fromDegrees(d.longitude, d.latitude, d.altitude*1000);
+    if(!issShown) issShown = issPositionAt(issFixTime);
     const r = d.footprint*1000/2;
     issRing.ellipse.semiMajorAxis = r;
     issRing.ellipse.semiMinorAxis = r;
@@ -716,17 +735,9 @@ pollISS();
 // ポーリング間は実測速度+進行方位から大圏航法で推測航行し、なめらかに連続移動させる
 // (単純なlerpだと「新しい実測値へ素早く追いつき、その後静止」を繰り返しカクついて見える)。
 // 選択中かつ実モデル読込済みなら、近接時にモデルへ差し替える。
-const ISS_R = 6371 + 408; // 平均軌道半径(km)。地表半径ではなくISS高度分を足したもの
 viewer.clock.onTick.addEventListener(()=>{
   if (issFixTime == null) return;
-  const dtH = (Date.now() - issFixTime) / 3600000; // 経過時間(時)
-  const distKm = issSpeedKmh * dtH;
-  const δ = distKm / ISS_R; // 移動角距離(rad)
-  const φ1 = issFixLat*Math.PI/180, λ1 = issFixLon*Math.PI/180, θ = issHeading;
-  const φ2 = Math.asin(Math.sin(φ1)*Math.cos(δ) + Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
-  const λ2 = λ1 + Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1), Math.cos(δ) - Math.sin(φ1)*Math.sin(φ2));
-  issShown = Cesium.Cartesian3.fromDegrees(
-    λ2*180/Math.PI, φ2*180/Math.PI, issFixAlt*1000, undefined, issShown || undefined);
+  issShown = issPositionAt(Date.now(), issShown || undefined);
 
   if (issModel && issModelState === 'ready'){
     const showModel = selection.kind === 'iss' &&
@@ -864,10 +875,16 @@ function selectObject(kind, opts){
   // (次のレンダーフレームまでPENDING状態)、見た目(point/box等)も無いため
   // viewer.flyTo(entity) は失敗する。position を同期的にサンプリングして
   // camera.flyToBoundingSphere に直接渡すことでこれを回避する。
-  const startPos = positionProp.getValue(viewer.clock.currentTime);
+  //
+  // さらに重要な点として、"今の位置"ではなく"到着予定時刻の予測位置"に飛ぶ。
+  // ISSは秒速7.66km、衛星群も高速で動くため、静止した1点をめがけて2.4秒かけて
+  // 飛ぶと、到着した頃には対象は数km〜十数km先へ進んでしまい追いつけなくなる。
+  const FLY_DURATION = 2.4;
+  const futureTime = Cesium.JulianDate.addSeconds(viewer.clock.currentTime, FLY_DURATION, new Cesium.JulianDate());
+  const startPos = positionProp.getValue(futureTime) || positionProp.getValue(viewer.clock.currentTime);
   if (startPos){
     camera.flyToBoundingSphere(new Cesium.BoundingSphere(startPos, 50), {
-      duration: 2.4,
+      duration: FLY_DURATION,
       offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(30), Cesium.Math.toRadians(-20), flyRange),
       complete: ()=>{ followTarget = positionProp; followLastPos = null; }
     });
