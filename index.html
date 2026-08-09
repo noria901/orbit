@@ -192,7 +192,7 @@
   <b>地震</b> USGS Earthquake Hazards（Public Domain）<br>
   <b>気象</b> 気象庁 アメダス（政府標準利用規約）<br>
   <b>地点</b> <a href="https://open-meteo.com/" target="_blank">Weather data by Open-Meteo.com</a>（CC BY 4.0）<br>
-  <b>近接概形</b> 実CADは存在しないため、本体+パネルの簡略化した代表シルエット(ISSは実寸比)<br>
+  <b>近接概形</b> ISSのみ<a href="https://science.nasa.gov/resource/international-space-station-3d-model/" target="_blank">NASA VTAD 実モデル</a>(Public Domain・遅延読込・重心オフセット自動補正)、他は簡略化した代表シルエット<br>
   <div id="debugline" class="mono">loading…</div>
 </div>
 
@@ -767,9 +767,36 @@ pollISS();
 // scene.preUpdate で更新することで、Cesium内部のtrackedEntity/カメラ追従処理が
 // このフレームの位置を参照する前に確実にissShownが最新化されているようにする
 // (viewer.clock.onTickだと内部処理より後に発火し、1フレーム分ズレることがあった)。
+const _issHprScratch = new Cesium.HeadingPitchRoll();
+const _issRotScratch = new Cesium.Matrix3();
+const _issRotOffsetScratch = new Cesium.Cartesian3();
+const _issTranslationScratch = new Cesium.Cartesian3();
 scene.preUpdate.addEventListener(()=>{
   if (issFixTime == null) return;
   issShown = issPositionAt(Date.now(), issShown || undefined);
+
+  if (issModel && issModelState === 'ready'){
+    const showModel = selection.kind === 'iss' &&
+      Cesium.Cartesian3.distance(camera.positionWC, issShown) < NEAR_DIST;
+    issModel.show = showModel;
+    if (showModel){
+      _issHprScratch.heading = issHeading; _issHprScratch.pitch = 0; _issHprScratch.roll = 0;
+      // まず「原点をissShownに正しく置いた」変換を作り、そこから回転成分だけ取り出す
+      issModel.modelMatrix = Cesium.Transforms.headingPitchRollToFixedFrame(
+        issShown, _issHprScratch, Cesium.Ellipsoid.WGS84, undefined, issModel.modelMatrix);
+      if (issModelLocalCenter && Cesium.Cartesian3.magnitudeSquared(issModelLocalCenter) > 1e-6){
+        Cesium.Matrix4.getMatrix3(issModel.modelMatrix, _issRotScratch);
+        Cesium.Matrix3.multiplyByVector(_issRotScratch, issModelLocalCenter, _issRotOffsetScratch);
+        // 見た目の重心(ローカル中心を回転させたもの)がissShownに来るよう、
+        // 平行移動量を (issShown - 回転後ローカル中心) に補正する
+        Cesium.Cartesian3.subtract(issShown, _issRotOffsetScratch, _issTranslationScratch);
+        Cesium.Matrix4.setTranslation(issModel.modelMatrix, _issTranslationScratch, issModel.modelMatrix);
+      }
+    }
+    if (selection.kind === 'iss'){
+      selection.entities.forEach(e=>{ if(e.box) e.show = !showModel; }); // 実モデル表示中はボックスを隠す
+    }
+  }
 });
 
 /* ============================================================
@@ -845,15 +872,44 @@ function addShapeBox(positionProp, orientation, dims, css, alpha){
   });
 }
 
-// NASA VTAD 公開の実ISS glTFモデル(約42MB、Public Domain)は以前試したが、
+// NASA VTAD 公開の実ISS glTFモデル(約42MB、Public Domain)。
 // モデル自身の内部原点がジオメトリの見た目の重心とズレているらしく、
-// カメラは正しくISSの位置を追従しているのに、モデル本体だけが画面の隅に
-// 表示される不具合が確認された。42MBのglTF内部構造をこちらで検証する
-// 手段が無く、原点オフセットを推測で補正するとさらに不確実な修正を
-// 重ねることになるため、実モデルの自動読み込みは無効化し、Cesiumの
-// 通常のEntity系統(カメラ追従と原理的にズレない)で駆動される
-// ボックス概形のみで統一している。
-const ISS_MODEL_URL = 'https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/i/ISS_stationary.glb'; // 現在未使用
+// 素朴に配置すると画面の隅に飛んで見えたため、以下の補正を行う:
+//   1. 単位行列(何も変換していない)状態で boundingSphere.center を測定する
+//      → これがモデル自身のローカル座標系での「見た目の重心」c_local
+//   2. 配置時、通常の headingPitchRollToFixedFrame で得られる変換の
+//      回転成分Rだけを取り出し、平行移動量を (狙った位置 - R×c_local) に補正する
+//      → 見た目の重心が狙った位置に一致するよう、原点の置き場所を逆算する
+// 検証手段が無いのでサイズが常識外(ISS本体より大きい)ならモデル自体を諦める。
+const ISS_MODEL_URL = 'https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/i/ISS_stationary.glb';
+let issModel = null, issModelState = 'idle', issModelLocalCenter = null; // idle|loading|ready|failed
+
+async function ensureIssModel(){
+  if (issModelState === 'loading' || issModelState === 'ready') return;
+  issModelState = 'loading';
+  try{
+    const m = await Cesium.Model.fromGltfAsync({ url: ISS_MODEL_URL, minimumPixelSize: 24, scale: 1.0 });
+    scene.primitives.add(m);
+    m.show = false;
+    const c = m.boundingSphere ? m.boundingSphere.center : Cesium.Cartesian3.ZERO;
+    const mag = Cesium.Cartesian3.magnitude(c);
+    if (mag > 500){
+      // ISS本体(約109m)に対して重心オフセットが500mを超えるのは想定外。
+      // 補正の前提(単純なローカル原点ズレ)が崩れている可能性が高く、
+      // 誤補正で余計おかしな位置に出すよりモデル自体を諦める。
+      issModelState = 'failed';
+      console.warn('[orbit] ISS実モデル: ローカル中心オフセットが異常に大きい('+mag.toFixed(0)+'m)。代表シルエットで継続します。', c);
+      return;
+    }
+    issModelLocalCenter = Cesium.Cartesian3.clone(c, new Cesium.Cartesian3());
+    issModel = m;
+    issModelState = 'ready';
+    console.info('[orbit] ISS実モデル読込完了。ローカル中心オフセット補正:', mag.toFixed(1)+'m');
+  }catch(e){
+    issModelState = 'failed';
+    console.warn('[orbit] ISS実モデルの読み込みに失敗（CORS制限などの可能性）。代表シルエットで継続します。', e);
+  }
+}
 
 function selectObject(kind, opts){
   clearSelection();
@@ -867,6 +923,7 @@ function selectObject(kind, opts){
     entities.push(addShapeBox(positionProp, issOrientation, new Cesium.Cartesian3(1.5,73,4), '#1E3A6E', 0.92)); // 太陽電池パネル
     issEntity.point.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(NEAR_DIST, Number.MAX_VALUE);
     flyRange = 350;
+    ensureIssModel(); // fire-and-forget、完了次第tickハンドラが自動的にボックスと差し替える
   } else if (kind === 'bulkSat'){
     const idx = opts.index;
     const satrec = catalogue.satrecs[idx];
@@ -971,7 +1028,7 @@ handler.setInputAction(async (click)=>{
         <div class="kv"><span>速度</span><b>${Math.round(d.velocity).toLocaleString()} km/h</b></div>
         <div class="kv"><span>可視半径</span><b>${Math.round(d.footprint/2).toLocaleString()} km</b></div>
         <div class="kv"><span>日照</span><b>${d.visibility==='daylight'?'昼':'夜'}</b></div>
-        <div class="cf">実測位置 ・ wheretheiss.at</div>` : '<div class="ct">取得中…</div>');
+        <div class="cf">実測位置 ・ wheretheiss.at<br>近接時の3Dモデル: NASA VTAD(Public Domain)</div>` : '<div class="ct">取得中…</div>');
       if (issShown) selectObject('iss', {});
       return;
     }
