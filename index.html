@@ -176,7 +176,7 @@
   <div class="hd mono">SOURCES / LICENCE</div>
   <b>衛星カタログ</b> <a href="https://celestrak.org/" target="_blank">CelesTrak</a> GP/TLE（GROUP=active）・GitHub Actionsが3時間毎に取得、SGP4で自前伝播<br>
   <b>ISS</b> wheretheiss.at 実測位置（要認証なし）<br>
-  <b>地形・海洋</b> Natural Earth II（PD）+ <a href="https://gibs.earthdata.nasa.gov/" target="_blank">NASA GIBS</a> MODIS Terra実衛星写真（ほぼ毎日更新）<br>
+  <b>地球テクスチャ</b> <a href="https://gibs.earthdata.nasa.gov/" target="_blank">NASA GIBS</a> Blue Marble(下地・静的)+ MODIS Terra実写(上層・ほぼ毎日更新)<br>
   <b>地震</b> USGS Earthquake Hazards（Public Domain）<br>
   <b>気象</b> 気象庁 アメダス（政府標準利用規約）<br>
   <b>地点</b> <a href="https://open-meteo.com/" target="_blank">Weather data by Open-Meteo.com</a>（CC BY 4.0）<br>
@@ -206,8 +206,15 @@
 Cesium.Ion.defaultAccessToken = undefined;
 
 const viewer = new Cesium.Viewer('globe', {
-  imageryProvider: new Cesium.TileMapServiceImageryProvider({
-    url: Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII')
+  imageryProvider: new Cesium.WebMapTileServiceImageryProvider({
+    url: 'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/wmts.cgi', // KVP方式(日付不要の静的レイヤ)
+    layer: 'BlueMarble_NextGeneration',
+    style: 'default',
+    format: 'image/jpeg',
+    tileMatrixSetID: '500m',
+    tilingScheme: new Cesium.GeographicTilingScheme(),
+    maximumLevel: 8,
+    credit: new Cesium.Credit('NASA EOSDIS GIBS / Blue Marble Next Generation')
   }),
   baseLayerPicker:false, geocoder:false, homeButton:false, sceneModePicker:false,
   navigationHelpButton:false, animation:false, timeline:false, fullscreenButton:false,
@@ -217,11 +224,12 @@ const viewer = new Cesium.Viewer('globe', {
 
 const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
 
-/* ---- 地球テクスチャ：NASA GIBS の実衛星写真(MODIS Terra 真色, ほぼ毎日更新) ----
-   下地はCesium同梱のNatural Earth II(常に安定・オフライン相当)を残し、
-   その上にGIBSの実写JPEGタイルを重ねる。GIBSが失敗/欠損しても
-   下のレイヤがそのまま見えるフェイルセーフ構成。
-   最新日は極域の夜側などで欠損が出ることがあるため、UTC前日を指定。 */
+/* ---- 地球テクスチャ：2層構成 ----
+   下地: NASA Blue Marble Next Generation（雲なし・常設・静的な合成写真。KVP方式なので日付指定不要）
+   上層: NASA GIBS MODIS Terra 真色画像（実際の雲入り、ほぼ毎日更新）
+   上層のタイルが欠損している場所は下地のBlue Marbleがそのまま透けて見えるので、
+   「常に破綻しない下地」の上に「その日の実況」を重ねるフェイルセーフ構成になっている。
+   最新日は極域の夜側などでモザイク欠損が出ることがあるため、上層はUTC前日を指定。 */
 (function addGibsTrueColorLayer(){
   try{
     const d = new Date(Date.now() - 86400000); // UTC前日（当日はモザイクが完成していない領域が出るため）
@@ -237,9 +245,9 @@ const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
       credit: new Cesium.Credit('NASA EOSDIS GIBS / MODIS Terra Corrected Reflectance (' + dateStr + ')')
     });
     viewer.imageryLayers.addImageryProvider(gibs);
-    console.info('[orbit] GIBS実衛星画像レイヤ追加:', dateStr);
+    console.info('[orbit] GIBS実写(雲入り)レイヤをBlue Marble上に追加:', dateStr);
   }catch(e){
-    console.warn('[orbit] GIBSレイヤ追加失敗。Natural Earth IIのみで継続します。', e);
+    console.warn('[orbit] GIBS実写レイヤ追加失敗。Blue Marbleのみで継続します。', e);
   }
 })();
 
