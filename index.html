@@ -898,9 +898,14 @@ async function ensureIssModel(){
     const m = await Cesium.Model.fromGltfAsync({ url: ISS_MODEL_URL, minimumPixelSize: 24 });
     // modelMatrixは触らない(単位行列のまま)。地球中心付近に一瞬置かれる形になるが、
     // 補正値が取れるまでの間だけなので実質見えない。
+    // ここでは issModel にまだ代入しない。代入するとtickハンドラ側の
+    // 「補正値が無い間は粗い位置(issShownに仮配置)で表示する」フォールバックが
+    // 毎フレーム動いてしまい、単位行列のまま測るはずのboundingSphereを
+    // 実際には仮配置後の状態で読んでしまう(=ワールド座標をローカル座標と
+    // 誤認する)という不具合が実機ログで確認された。測定が終わるまでは
+    // tickハンドラから完全に見えない状態にしておく。
     scene.primitives.add(m);
     m.show = true; // false のままだと内部更新処理自体がスキップされ boundingSphere が永久に取れなかった
-    issModel = m; // 補正前でもtickハンドラが位置更新できるよう先に代入(issModelStateは'ready'until補正取得後)
 
     let tries = 0;
     const tryRead = ()=>{
@@ -915,6 +920,7 @@ async function ensureIssModel(){
           radius: r
         });
         issModelLocalCenter = c ? Cesium.Cartesian3.clone(c, new Cesium.Cartesian3()) : Cesium.Cartesian3.ZERO;
+        issModel = m; // 測定が終わってから初めてtickハンドラに渡す
         issModelState = 'ready';
       }catch(e2){
         if (tries < 60){ // 約1秒ぶんリトライ(60fps想定)
