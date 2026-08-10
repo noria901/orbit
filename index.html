@@ -891,18 +891,30 @@ async function ensureIssModel(){
     const m = await Cesium.Model.fromGltfAsync({ url: ISS_MODEL_URL, minimumPixelSize: 24 });
     scene.primitives.add(m);
     m.show = false;
-    const hasSphere = !!m.boundingSphere;
-    const c = hasSphere ? m.boundingSphere.center : null;
-    const r = hasSphere ? m.boundingSphere.radius : null;
-    console.info('[orbit] ISSモデル診断:', {
-      boundingSphereExists: hasSphere,
-      center: c ? { x:c.x, y:c.y, z:c.z, magnitude: Cesium.Cartesian3.magnitude(c) } : null,
-      radius: r,
-      modelMatrixAtLoad: Cesium.Matrix4.clone(m.modelMatrix)
+    // 実機コンソールで確認済み: 追加直後(レンダーパスを1度も経ていない状態)で
+    // m.boundingSphere を読むと Cesium 内部で TypeError が投げられる
+    // ("Cannot read properties of undefined (reading 'boundingSphere')")。
+    // 1回レンダーパスを経てから読むよう scene.postRender を1回だけ使う。
+    const removeListener = scene.postRender.addEventListener(()=>{
+      removeListener();
+      try{
+        const hasSphere = !!m.boundingSphere;
+        const c = hasSphere ? m.boundingSphere.center : null;
+        const r = hasSphere ? m.boundingSphere.radius : null;
+        console.info('[orbit] ISSモデル診断:', {
+          boundingSphereExists: hasSphere,
+          center: c ? { x:c.x, y:c.y, z:c.z, magnitude: Cesium.Cartesian3.magnitude(c) } : null,
+          radius: r,
+          modelMatrixAtLoad: Cesium.Matrix4.clone(m.modelMatrix)
+        });
+        issModelLocalCenter = c ? Cesium.Cartesian3.clone(c, new Cesium.Cartesian3()) : Cesium.Cartesian3.ZERO;
+        issModel = m;
+        issModelState = 'ready';
+      }catch(e2){
+        issModelState = 'failed';
+        console.warn('[orbit] ISS実モデル: 1フレーム待っても boundingSphere 取得失敗。ボックス概形のみで継続します。', e2);
+      }
     });
-    issModelLocalCenter = c ? Cesium.Cartesian3.clone(c, new Cesium.Cartesian3()) : Cesium.Cartesian3.ZERO;
-    issModel = m;
-    issModelState = 'ready';
   }catch(e){
     issModelState = 'failed';
     console.warn('[orbit] ISS実モデルの読み込みに失敗（CORS制限などの可能性）。ボックス概形のみで継続します。', e);
