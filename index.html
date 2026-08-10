@@ -180,7 +180,6 @@
   <div class="lyr on" data-k="quake"><span class="sw"></span><span class="n">地震 24h</span><span class="c mono" id="c-quake">–</span></div>
   <div class="lyr on" data-k="amedas"><span class="sw"></span><span class="n">アメダス実況</span><span class="c mono" id="c-amedas">–</span></div>
   <div class="lyr on" data-k="night"><span class="sw"></span><span class="n">昼夜境界</span><span class="c mono">live</span></div>
-  <div class="lyr off" data-k="terrain"><span class="sw"></span><span class="n">地形起伏</span><span class="c mono">3D</span></div>
   </div>
 </div>
 
@@ -1108,13 +1107,12 @@ handler.setInputAction(async (click)=>{
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
 /* ---- レイヤ切替 ---- */
-let terrainOn = false;
 document.getElementById('layers-head').onclick = ()=>{
   document.getElementById('layers').classList.toggle('collapsed');
 };
 
 document.querySelectorAll('.lyr').forEach(el=>{
-  el.onclick = async ()=>{
+  el.onclick = ()=>{
     const k = el.dataset.k;
     const on = !el.classList.contains('on');
     el.classList.toggle('on', on); el.classList.toggle('off', !on);
@@ -1126,19 +1124,6 @@ document.querySelectorAll('.lyr').forEach(el=>{
     if(k==='quake')  quakeDS.show  = on;
     if(k==='amedas') amedasDS.show = on;
     if(k==='night')  globe.enableLighting = on;
-    if(k==='terrain'){
-      terrainOn = on;
-      try{
-        viewer.terrainProvider = on
-          ? await Cesium.createWorldTerrainAsync()
-          : new Cesium.EllipsoidTerrainProvider();
-        globe.depthTestAgainstTerrain = false;
-      }catch(err){
-        el.classList.remove('on'); el.classList.add('off');
-        el.querySelector('.c').textContent='×';
-        console.warn('terrain unavailable', err);
-      }
-    }
   };
 });
 
