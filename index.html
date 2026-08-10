@@ -979,14 +979,16 @@ function selectObject(kind, opts){
   // ISSは秒速7.66km、衛星群も高速で動くため、静止した1点をめがけて2.4秒かけて
   // 飛ぶと、到着した頃には対象は数km〜十数km先へ進んでしまい追いつけなくなる。
   //
-  // trackedEntity は flyTo の complete を待たずに先にセットする。タッチ操作等で
-  // flyToBoundingSphere のアニメーションが途中で中断されると complete が発火せず、
-  // 追跡も一切始まらないままISSだけ秒速7.66kmで飛び去ってしまう不具合が実機で
-  // 確認されたため(ラベルだけ出て概形が一切表示されない=カメラが8000mより
-  // 遠くに取り残されている状態だった)。先にセットしておけば、たとえフライイン
-  // アニメーション自体が中断されても最低限の追従は保証される。
+  // trackedEntity はフライイン中はセットしない。フライインの最中にtrackedEntityが
+  // 有効だと、Cesium内部のEntityViewが毎フレームカメラのtransformを強制的に
+  // 上書きし続け、flyToBoundingSphereのアニメーションと競合してガクつき、
+  // さらに手動でのドラッグ操作もその都度EntityViewに巻き戻されて視点変更が
+  // 一切効かなくなる不具合が実機で確認された。そのため trackedEntity は
+  // フライイン完了後(complete)に一度だけセットする。ただしタッチ操作等で
+  // アニメーションが中断された場合は complete が発火しないため、その場合も
+  // 追跡だけは開始できるよう cancel でも同じ処理を行う。
   const trackTarget = (kind === 'iss') ? issEntity : satTrackEntity;
-  viewer.trackedEntity = trackTarget;
+  const startTracking = ()=>{ if (selection.kind === kind) viewer.trackedEntity = trackTarget; };
 
   const FLY_DURATION = 2.4;
   const startPos = kind === 'iss'
@@ -995,8 +997,12 @@ function selectObject(kind, opts){
   if (startPos){
     camera.flyToBoundingSphere(new Cesium.BoundingSphere(startPos, 50), {
       duration: FLY_DURATION,
-      offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(30), Cesium.Math.toRadians(-20), flyRange)
+      offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(30), Cesium.Math.toRadians(-20), flyRange),
+      complete: startTracking,
+      cancel: startTracking
     });
+  } else {
+    startTracking(); // 位置が即座に取れない場合はフライインを諦めて追跡だけ開始
   }
 
   if (kind === 'iss'){ btnIss.textContent = '追尾を解除'; btnIss.classList.add('home'); }
