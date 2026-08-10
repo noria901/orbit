@@ -192,7 +192,7 @@
   <b>地震</b> USGS Earthquake Hazards（Public Domain）<br>
   <b>気象</b> 気象庁 アメダス（政府標準利用規約）<br>
   <b>地点</b> <a href="https://open-meteo.com/" target="_blank">Weather data by Open-Meteo.com</a>（CC BY 4.0）<br>
-  <b>近接概形</b> 実CADは存在しないため、本体+パネルの簡略化した代表シルエット(ISSは実寸比 全長109m×パネル展張73m)<br>
+  <b>近接概形</b> ボックス(本体+パネル、ISSは実寸比)常時表示 + ISSのみ<a href="https://science.nasa.gov/resource/international-space-station-3d-model/" target="_blank">NASA VTAD 実モデル</a>を重ねて診断中(Public Domain)<br>
   <div id="debugline" class="mono">loading…</div>
 </div>
 
@@ -767,9 +767,40 @@ pollISS();
 // scene.preUpdate で更新することで、Cesium内部のtrackedEntity/カメラ追従処理が
 // このフレームの位置を参照する前に確実にissShownが最新化されているようにする
 // (viewer.clock.onTickだと内部処理より後に発火し、1フレーム分ズレることがあった)。
+let issModelDiagLogged = false;
 scene.preUpdate.addEventListener(()=>{
   if (issFixTime == null) return;
   issShown = issPositionAt(Date.now(), issShown || undefined);
+
+  if (issModel && issModelState === 'ready'){
+    const showModel = selection.kind === 'iss' &&
+      Cesium.Cartesian3.distance(camera.positionWC, issShown) < NEAR_DIST;
+    issModel.show = showModel;
+    if (showModel){
+      const hpr = new Cesium.HeadingPitchRoll(issHeading, 0, 0);
+      const placed = Cesium.Transforms.headingPitchRollToFixedFrame(
+        issShown, hpr, Cesium.Ellipsoid.WGS84, undefined, new Cesium.Matrix4());
+      const rot = Cesium.Matrix4.getMatrix3(placed, new Cesium.Matrix3());
+      const rotatedOffset = Cesium.Matrix3.multiplyByVector(rot, issModelLocalCenter, new Cesium.Cartesian3());
+      const correctedTranslation = Cesium.Cartesian3.subtract(issShown, rotatedOffset, new Cesium.Cartesian3());
+      issModel.modelMatrix = Cesium.Matrix4.setTranslation(placed, correctedTranslation, issModel.modelMatrix);
+      if (!issModelDiagLogged){
+        issModelDiagLogged = true;
+        console.info('[orbit] ISSモデル配置診断:', {
+          issShown: { x:issShown.x, y:issShown.y, z:issShown.z },
+          issModelLocalCenter: { x:issModelLocalCenter.x, y:issModelLocalCenter.y, z:issModelLocalCenter.z },
+          correctedTranslation: { x:correctedTranslation.x, y:correctedTranslation.y, z:correctedTranslation.z },
+          distanceCorrectedFromIssShown: Cesium.Cartesian3.distance(correctedTranslation, issShown),
+          modelBoundingSphereAfterPlacement: issModel.boundingSphere ? {
+            center: { x: issModel.boundingSphere.center.x, y: issModel.boundingSphere.center.y, z: issModel.boundingSphere.center.z },
+            radius: issModel.boundingSphere.radius,
+            distanceFromIntendedPos: Cesium.Cartesian3.distance(issModel.boundingSphere.center, issShown)
+          } : 'boundingSphere未取得'
+        });
+      }
+    }
+    // ボックスは常時表示のまま(モデルとの位置比較用、および万一モデルが見えなくても何かは必ず見える保険)
+  }
 });
 
 /* ============================================================
@@ -845,14 +876,38 @@ function addShapeBox(positionProp, orientation, dims, css, alpha){
   });
 }
 
-// NASA VTAD 公開の実ISS glTFモデル(約42MB、Public Domain)は2回試したが、
-// 1回目は重心が画面の隅に飛ぶ不具合、2回目は重心オフセット補正を入れたところ
-// 今度はモデル自体が全く描画されない不具合と、毎回違う壊れ方をした。
-// ライブブラウザで検証できない状態でこの42MBアセットの内部構造に起因する
-// 不具合を推測ベースで直し続けるのは不誠実と判断し、実モデル統合は断念する。
-// Cesiumの通常のEntity系統で駆動され、カメラ追従と原理的にズレないボックス概形
-// (ISSは実寸比 全長109m×パネル展張73m)のみで統一する。
-const ISS_MODEL_URL = 'https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/i/ISS_stationary.glb'; // 現在未使用(上記経緯により)
+// NASA VTAD 公開の実ISS glTFモデル(約42MB、Public Domain)。
+// 過去2回、原点/重心の扱いで別々の壊れ方をした。今回は「ボックスは常に表示したまま
+// モデルも重ねて出す」構成にして、最低でも何かは必ず見える状態を保ちつつ、
+// 実際の boundingSphere の値をコンソールに出す。ブラウザのdevtoolsコンソールで
+// [orbit] ISSモデル診断 のログを見てもらえれば、次にどう補正すべきか確定的に分かる。
+const ISS_MODEL_URL = 'https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/i/ISS_stationary.glb';
+let issModel = null, issModelState = 'idle', issModelLocalCenter = null; // idle|loading|ready|failed
+
+async function ensureIssModel(){
+  if (issModelState === 'loading' || issModelState === 'ready') return;
+  issModelState = 'loading';
+  try{
+    const m = await Cesium.Model.fromGltfAsync({ url: ISS_MODEL_URL, minimumPixelSize: 24 });
+    scene.primitives.add(m);
+    m.show = false;
+    const hasSphere = !!m.boundingSphere;
+    const c = hasSphere ? m.boundingSphere.center : null;
+    const r = hasSphere ? m.boundingSphere.radius : null;
+    console.info('[orbit] ISSモデル診断:', {
+      boundingSphereExists: hasSphere,
+      center: c ? { x:c.x, y:c.y, z:c.z, magnitude: Cesium.Cartesian3.magnitude(c) } : null,
+      radius: r,
+      modelMatrixAtLoad: Cesium.Matrix4.clone(m.modelMatrix)
+    });
+    issModelLocalCenter = c ? Cesium.Cartesian3.clone(c, new Cesium.Cartesian3()) : Cesium.Cartesian3.ZERO;
+    issModel = m;
+    issModelState = 'ready';
+  }catch(e){
+    issModelState = 'failed';
+    console.warn('[orbit] ISS実モデルの読み込みに失敗（CORS制限などの可能性）。ボックス概形のみで継続します。', e);
+  }
+}
 
 function selectObject(kind, opts){
   clearSelection();
@@ -866,6 +921,7 @@ function selectObject(kind, opts){
     entities.push(addShapeBox(positionProp, issOrientation, new Cesium.Cartesian3(1.5,73,4), '#1E3A6E', 0.92)); // 太陽電池パネル
     issEntity.point.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(NEAR_DIST, Number.MAX_VALUE);
     flyRange = 350;
+    ensureIssModel(); // fire-and-forget、完了次第tickハンドラがボックスに重ねて表示する
   } else if (kind === 'bulkSat'){
     const idx = opts.index;
     const satrec = catalogue.satrecs[idx];
