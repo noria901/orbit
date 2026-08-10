@@ -826,34 +826,31 @@ function clearSelection(){
   selection.entities.forEach(e=>shapeDS.entities.remove(e));
   selection.entities = [];
   selection.kind = null; selection.pointRef = null;
-  trackedSatrec = null;
-  viewer.trackedEntity = undefined;
+  followTarget = null; followLastPos = null;
   if (catalogue.points && !groundMode) catalogue.points.show = true; // 接写用に隠していた衛星群を復元
   btnIss.textContent = 'ISS を追う';
   btnIss.classList.remove('home');
 }
 
-// 衛星カタログ用の「常設」追跡アンカー。trackedEntityは内部でカメラのtransformを
-// 毎フレーム対象の位置に更新し続ける(＝真の意味でのカメラの子オブジェクト化)ため、
-// 自前でcamera.positionを差分移動させるより正しく安定する。ただし対象が
-// 「追加された直後のエンティティ」だとバウンディングスフィア計算が間に合わず
-// うまく機能しないことがあるため、ページ読み込み時から存在する常設のエンティティを
-// 1個だけ用意し、追跡したい衛星が変わったら中身(trackedSatrec)だけ差し替える。
-let trackedSatrec = null;
-const satTrackEntity = shapeDS.entities.add({
-  position: new Cesium.CallbackProperty((time, result)=>{
-    if (!trackedSatrec) return undefined;
-    try{
-      const jsTime = Cesium.JulianDate.toDate(time);
-      const gmst = satellite.gstime(jsTime);
-      const pv = satellite.propagate(trackedSatrec, jsTime);
-      if (pv && pv.position){
-        const ecf = satellite.eciToEcf(pv.position, gmst);
-        return Cesium.Cartesian3.fromElements(ecf.x*1000, ecf.y*1000, ecf.z*1000, result);
-      }
-    }catch(e){}
-    return result;
-  }, false)
+// 自前の追従カメラ：対象の位置が1フレームで動いた分だけカメラも同じ量だけ平行移動させる。
+// Cesium標準のtrackedEntity/EntityViewは内部でcamera.transformを毎フレーム強制的に
+// 上書きするため、こちらの独自flyToBoundingSphereアニメーションや、ユーザーの
+// 手動ドラッグ操作(通常はcamera.position/orientationを直接操作する)と競合し、
+// ①ガクつく ②視点変更が一切効かなくなる、という2つの不具合を引き起こすことが
+// 実機で確認された。position(camera.transformには触らない)だけを動かすこの方式なら
+// どちらとも衝突しない。scene.postUpdateでカメラ操作が確定した後に追従分を上乗せする。
+let followTarget = null, followLastPos = null;
+scene.postUpdate.addEventListener(()=>{
+  if (!followTarget) return;
+  const pos = followTarget.getValue(viewer.clock.currentTime);
+  if (!pos) return;
+  if (followLastPos){
+    const delta = Cesium.Cartesian3.subtract(pos, followLastPos, new Cesium.Cartesian3());
+    if (Cesium.Cartesian3.magnitudeSquared(delta) > 1e-6){
+      camera.position = Cesium.Cartesian3.add(camera.position, delta, camera.position);
+    }
+  }
+  followLastPos = Cesium.Cartesian3.clone(pos, followLastPos);
 });
 
 function makeSatPositionProperty(satrec){
@@ -955,7 +952,6 @@ function selectObject(kind, opts){
   } else if (kind === 'bulkSat'){
     const idx = opts.index;
     const satrec = catalogue.satrecs[idx];
-    trackedSatrec = satrec; // 常設アンカーが追う中身をこの衛星に差し替える
     positionProp = makeSatPositionProperty(satrec);
     const orientation = new Cesium.VelocityOrientationProperty(positionProp);
     entities.push(addShapeBox(positionProp, orientation, new Cesium.Cartesian3(2,2,3), '#B8C4D0', 1.0));     // 本体
@@ -979,16 +975,9 @@ function selectObject(kind, opts){
   // ISSは秒速7.66km、衛星群も高速で動くため、静止した1点をめがけて2.4秒かけて
   // 飛ぶと、到着した頃には対象は数km〜十数km先へ進んでしまい追いつけなくなる。
   //
-  // trackedEntity はフライイン中はセットしない。フライインの最中にtrackedEntityが
-  // 有効だと、Cesium内部のEntityViewが毎フレームカメラのtransformを強制的に
-  // 上書きし続け、flyToBoundingSphereのアニメーションと競合してガクつき、
-  // さらに手動でのドラッグ操作もその都度EntityViewに巻き戻されて視点変更が
-  // 一切効かなくなる不具合が実機で確認された。そのため trackedEntity は
-  // フライイン完了後(complete)に一度だけセットする。ただしタッチ操作等で
-  // アニメーションが中断された場合は complete が発火しないため、その場合も
-  // 追跡だけは開始できるよう cancel でも同じ処理を行う。
-  const trackTarget = (kind === 'iss') ? issEntity : satTrackEntity;
-  const startTracking = ()=>{ if (selection.kind === kind) viewer.trackedEntity = trackTarget; };
+  // 追従は自前のfollowTarget方式(scene.postUpdateで差分移動)を使う。
+  // Cesium標準のtrackedEntityはフライイン中や手動ドラッグ操作と競合するため不採用。
+  const startTracking = ()=>{ if (selection.kind === kind){ followTarget = positionProp; followLastPos = null; } };
 
   const FLY_DURATION = 2.4;
   const startPos = kind === 'iss'
@@ -1167,7 +1156,7 @@ document.querySelector('.jbtn.home').onclick = ()=>{
 };
 const btnIss = document.getElementById('btn-iss');
 btnIss.onclick = ()=>{
-  if(viewer.trackedEntity){
+  if(followTarget){
     clearSelection();
     return;
   }
