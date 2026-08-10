@@ -883,10 +883,11 @@ function addShapeBox(positionProp, orientation, dims, css, alpha){
 // NASA VTAD 公開の実ISS glTFモデル(約42MB、Public Domain)。
 // show=false のまま追加すると、Cesium内部が「非表示のプリミティブ」として
 // 更新処理自体をスキップするらしく、何フレーム待っても boundingSphere が
-// 取得できないことが実機で確認された(1フレーム待つだけでは直らなかった)。
-// そのため最初から show=true・大まかな位置(補正無し)で表示しておき、
-// 実際に処理された後で boundingSphere を読んで重心補正を後から適用する
-// (補正が効くまでの一瞬だけ位置がズレて見える可能性があるが許容する)。
+// 取得できないことが実機で確認された。そのため show=true は維持しつつ、
+// modelMatrixは単位行列(初期値のまま、地球中心=ほぼ見えない位置)にしておく。
+// これで boundingSphere.center が「モデル自身のローカル座標系での重心」を
+// 正しく返すようになる(以前、issShownへ仮配置した状態で測っていたせいで
+// ワールド座標をローカル座標と誤認し、補正後に数百万m単位で吹っ飛ぶ不具合があった)。
 const ISS_MODEL_URL = 'https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/i/ISS_stationary.glb';
 let issModel = null, issModelState = 'idle', issModelLocalCenter = null; // idle|loading|ready|failed
 
@@ -895,10 +896,8 @@ async function ensureIssModel(){
   issModelState = 'loading';
   try{
     const m = await Cesium.Model.fromGltfAsync({ url: ISS_MODEL_URL, minimumPixelSize: 24 });
-    if (issShown){
-      m.modelMatrix = Cesium.Transforms.headingPitchRollToFixedFrame(
-        issShown, new Cesium.HeadingPitchRoll(issHeading, 0, 0), Cesium.Ellipsoid.WGS84);
-    }
+    // modelMatrixは触らない(単位行列のまま)。地球中心付近に一瞬置かれる形になるが、
+    // 補正値が取れるまでの間だけなので実質見えない。
     scene.primitives.add(m);
     m.show = true; // false のままだと内部更新処理自体がスキップされ boundingSphere が永久に取れなかった
     issModel = m; // 補正前でもtickハンドラが位置更新できるよう先に代入(issModelStateは'ready'until補正取得後)
