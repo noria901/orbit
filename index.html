@@ -771,7 +771,7 @@ scene.preUpdate.addEventListener(()=>{
   if (issFixTime == null) return;
   issShown = issPositionAt(Date.now(), issShown || undefined);
 
-  if (issModel && issModelState === 'ready'){
+  if (issModel){
     const showModel = selection.kind === 'iss' &&
       Cesium.Cartesian3.distance(camera.positionWC, issShown) < NEAR_DIST;
     issModel.show = showModel;
@@ -779,23 +779,28 @@ scene.preUpdate.addEventListener(()=>{
       const hpr = new Cesium.HeadingPitchRoll(issHeading, 0, 0);
       const placed = Cesium.Transforms.headingPitchRollToFixedFrame(
         issShown, hpr, Cesium.Ellipsoid.WGS84, undefined, new Cesium.Matrix4());
-      const rot = Cesium.Matrix4.getMatrix3(placed, new Cesium.Matrix3());
-      const rotatedOffset = Cesium.Matrix3.multiplyByVector(rot, issModelLocalCenter, new Cesium.Cartesian3());
-      const correctedTranslation = Cesium.Cartesian3.subtract(issShown, rotatedOffset, new Cesium.Cartesian3());
-      issModel.modelMatrix = Cesium.Matrix4.setTranslation(placed, correctedTranslation, issModel.modelMatrix);
-      if (!issModelDiagLogged){
-        issModelDiagLogged = true;
-        console.info('[orbit] ISSモデル配置診断:', {
-          issShown: { x:issShown.x, y:issShown.y, z:issShown.z },
-          issModelLocalCenter: { x:issModelLocalCenter.x, y:issModelLocalCenter.y, z:issModelLocalCenter.z },
-          correctedTranslation: { x:correctedTranslation.x, y:correctedTranslation.y, z:correctedTranslation.z },
-          distanceCorrectedFromIssShown: Cesium.Cartesian3.distance(correctedTranslation, issShown),
-          modelBoundingSphereAfterPlacement: issModel.boundingSphere ? {
-            center: { x: issModel.boundingSphere.center.x, y: issModel.boundingSphere.center.y, z: issModel.boundingSphere.center.z },
-            radius: issModel.boundingSphere.radius,
-            distanceFromIntendedPos: Cesium.Cartesian3.distance(issModel.boundingSphere.center, issShown)
-          } : 'boundingSphere未取得'
-        });
+      if (issModelState === 'ready' && issModelLocalCenter){
+        // 重心オフセット補正が取得済みなら、見た目の重心がissShownに一致するよう平行移動を補正する
+        const rot = Cesium.Matrix4.getMatrix3(placed, new Cesium.Matrix3());
+        const rotatedOffset = Cesium.Matrix3.multiplyByVector(rot, issModelLocalCenter, new Cesium.Cartesian3());
+        const correctedTranslation = Cesium.Cartesian3.subtract(issShown, rotatedOffset, new Cesium.Cartesian3());
+        issModel.modelMatrix = Cesium.Matrix4.setTranslation(placed, correctedTranslation, issModel.modelMatrix);
+        if (!issModelDiagLogged){
+          issModelDiagLogged = true;
+          console.info('[orbit] ISSモデル配置診断:', {
+            issShown: { x:issShown.x, y:issShown.y, z:issShown.z },
+            issModelLocalCenter: { x:issModelLocalCenter.x, y:issModelLocalCenter.y, z:issModelLocalCenter.z },
+            correctedTranslation: { x:correctedTranslation.x, y:correctedTranslation.y, z:correctedTranslation.z },
+            modelBoundingSphereAfterPlacement: issModel.boundingSphere ? {
+              center: { x: issModel.boundingSphere.center.x, y: issModel.boundingSphere.center.y, z: issModel.boundingSphere.center.z },
+              radius: issModel.boundingSphere.radius,
+              distanceFromIntendedPos: Cesium.Cartesian3.distance(issModel.boundingSphere.center, issShown)
+            } : 'boundingSphere未取得'
+          });
+        }
+      } else {
+        // まだ補正値が取れていない間は、原点をそのままissShownに置いた粗い位置で表示する
+        issModel.modelMatrix = Cesium.Matrix4.clone(placed, issModel.modelMatrix);
       }
     }
     // ボックスは常時表示のまま(モデルとの位置比較用、および万一モデルが見えなくても何かは必ず見える保険)
@@ -876,10 +881,12 @@ function addShapeBox(positionProp, orientation, dims, css, alpha){
 }
 
 // NASA VTAD 公開の実ISS glTFモデル(約42MB、Public Domain)。
-// 過去2回、原点/重心の扱いで別々の壊れ方をした。今回は「ボックスは常に表示したまま
-// モデルも重ねて出す」構成にして、最低でも何かは必ず見える状態を保ちつつ、
-// 実際の boundingSphere の値をコンソールに出す。ブラウザのdevtoolsコンソールで
-// [orbit] ISSモデル診断 のログを見てもらえれば、次にどう補正すべきか確定的に分かる。
+// show=false のまま追加すると、Cesium内部が「非表示のプリミティブ」として
+// 更新処理自体をスキップするらしく、何フレーム待っても boundingSphere が
+// 取得できないことが実機で確認された(1フレーム待つだけでは直らなかった)。
+// そのため最初から show=true・大まかな位置(補正無し)で表示しておき、
+// 実際に処理された後で boundingSphere を読んで重心補正を後から適用する
+// (補正が効くまでの一瞬だけ位置がズレて見える可能性があるが許容する)。
 const ISS_MODEL_URL = 'https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/i/ISS_stationary.glb';
 let issModel = null, issModelState = 'idle', issModelLocalCenter = null; // idle|loading|ready|failed
 
@@ -888,32 +895,39 @@ async function ensureIssModel(){
   issModelState = 'loading';
   try{
     const m = await Cesium.Model.fromGltfAsync({ url: ISS_MODEL_URL, minimumPixelSize: 24 });
+    if (issShown){
+      m.modelMatrix = Cesium.Transforms.headingPitchRollToFixedFrame(
+        issShown, new Cesium.HeadingPitchRoll(issHeading, 0, 0), Cesium.Ellipsoid.WGS84);
+    }
     scene.primitives.add(m);
-    m.show = false;
-    // 実機コンソールで確認済み: 追加直後(レンダーパスを1度も経ていない状態)で
-    // m.boundingSphere を読むと Cesium 内部で TypeError が投げられる
-    // ("Cannot read properties of undefined (reading 'boundingSphere')")。
-    // 1回レンダーパスを経てから読むよう scene.postRender を1回だけ使う。
-    const removeListener = scene.postRender.addEventListener(()=>{
-      removeListener();
+    m.show = true; // false のままだと内部更新処理自体がスキップされ boundingSphere が永久に取れなかった
+    issModel = m; // 補正前でもtickハンドラが位置更新できるよう先に代入(issModelStateは'ready'until補正取得後)
+
+    let tries = 0;
+    const tryRead = ()=>{
+      tries++;
       try{
         const hasSphere = !!m.boundingSphere;
         const c = hasSphere ? m.boundingSphere.center : null;
         const r = hasSphere ? m.boundingSphere.radius : null;
-        console.info('[orbit] ISSモデル診断:', {
+        console.info('[orbit] ISSモデル診断 (try '+tries+'):', {
           boundingSphereExists: hasSphere,
           center: c ? { x:c.x, y:c.y, z:c.z, magnitude: Cesium.Cartesian3.magnitude(c) } : null,
-          radius: r,
-          modelMatrixAtLoad: Cesium.Matrix4.clone(m.modelMatrix)
+          radius: r
         });
         issModelLocalCenter = c ? Cesium.Cartesian3.clone(c, new Cesium.Cartesian3()) : Cesium.Cartesian3.ZERO;
-        issModel = m;
         issModelState = 'ready';
       }catch(e2){
-        issModelState = 'failed';
-        console.warn('[orbit] ISS実モデル: 1フレーム待っても boundingSphere 取得失敗。ボックス概形のみで継続します。', e2);
+        if (tries < 60){ // 約1秒ぶんリトライ(60fps想定)
+          removeListener2 = scene.postRender.addEventListener(onPostRender);
+        } else {
+          issModelState = 'failed';
+          console.warn('[orbit] ISS実モデル: '+tries+'回試しても boundingSphere 取得失敗。補正無しの粗い位置のまま表示します。', e2);
+        }
       }
-    });
+    };
+    function onPostRender(){ removeListener2(); tryRead(); }
+    let removeListener2 = scene.postRender.addEventListener(onPostRender);
   }catch(e){
     issModelState = 'failed';
     console.warn('[orbit] ISS実モデルの読み込みに失敗（CORS制限などの可能性）。ボックス概形のみで継続します。', e);
