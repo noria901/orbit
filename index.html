@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ORBIT — 地球観測</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.114.0/Widgets/widgets.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.114.0/Cesium.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/satellite.js/4.0.0/satellite.min.js"></script>
+<style>
+  :root{
+    --void:#05070C; --glass:rgba(10,16,26,.72); --line:rgba(120,160,200,.22);
+    --text:#DCE6F0; --dim:#7C8FA6; --ion:#5FD3E8; --flare:#FF6B3D; --sol:#FFC94D; --ok:#5FE0A0;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:var(--void)}
+  body{font-family:"Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP",sans-serif;color:var(--text)}
+  .mono{font-family:"SF Mono","Cascadia Code",Menlo,Consolas,monospace}
+  #globe{position:absolute;inset:0}
+
+  /* Cesium クレジットは残す（帰属要件）が控えめに */
+  .cesium-widget-credits{font-size:9px!important;opacity:.45}
+  .cesium-viewer-bottom{bottom:2px!important}
+
+  /* ---- 起動オーバーレイ ---- */
+  #boot{position:absolute;inset:0;z-index:50;background:var(--void);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+    transition:opacity 1.1s ease;letter-spacing:.3em}
+  #boot .t{font-size:11px;color:var(--ion)}
+  #boot .bar{width:180px;height:1px;background:var(--line);position:relative;overflow:hidden}
+  #boot .bar i{position:absolute;inset:0;background:var(--ion);transform:translateX(-100%);
+    animation:sweep 1.4s ease-in-out infinite}
+  @keyframes sweep{to{transform:translateX(100%)}}
+
+  /* ---- 左上タイトル ---- */
+  #title{position:absolute;left:18px;top:16px;z-index:10;pointer-events:none}
+  #title .en{font-size:10px;letter-spacing:.42em;color:var(--ion);display:block}
+  #title .jp{font-size:15px;letter-spacing:.2em;margin-top:3px;
+    font-family:"Hiragino Mincho ProN","Yu Mincho",serif}
+  #title .alt{font-size:10px;color:var(--dim);margin-top:5px;letter-spacing:.1em}
+
+  /* ---- 右上レイヤ ---- */
+  #layers{position:absolute;right:14px;top:14px;z-index:10;
+    background:var(--glass);border:1px solid var(--line);border-radius:4px;
+    backdrop-filter:blur(10px);overflow:hidden;width:198px;
+    max-height:70vh;overflow-y:auto}
+  #layers-head{position:sticky;top:0;padding:9px 11px;font-size:10px;letter-spacing:.24em;
+    color:var(--ion);cursor:pointer;display:flex;justify-content:space-between;align-items:center;
+    background:var(--glass);border-bottom:1px solid var(--line)}
+  #layers-chevron{transition:transform .2s;color:var(--dim)}
+  #layers.collapsed #layers-body{display:none}
+  #layers.collapsed #layers-head{border-bottom:none}
+  #layers:not(.collapsed) #layers-chevron{transform:rotate(90deg)}
+  .lyr{display:flex;align-items:center;gap:9px;padding:9px 11px;cursor:pointer;
+    border-bottom:1px solid var(--line);transition:background .15s;font-size:12px}
+  .lyr:last-child{border-bottom:none}
+  .lyr:hover{background:rgba(95,211,232,.08)}
+  .lyr .sw{width:8px;height:8px;border-radius:50%;background:#33414F;
+    transition:background .2s,box-shadow .2s;flex-shrink:0}
+  .lyr.on .sw{background:var(--ok);box-shadow:0 0 7px var(--ok)}
+  .lyr.on[data-k="quake"] .sw{background:var(--flare);box-shadow:0 0 7px var(--flare)}
+  .lyr.on[data-k="amedas"] .sw{background:var(--sol);box-shadow:0 0 7px var(--sol)}
+  .lyr.on[data-k="iss"] .sw{background:#fff;box-shadow:0 0 8px #fff}
+  .lyr.on[data-k="qzss"] .sw,.lyr.on[data-k="track"] .sw{background:#FFC94D;box-shadow:0 0 7px #FFC94D}
+  .lyr.on[data-k="gps"] .sw{background:#5FD3E8;box-shadow:0 0 7px #5FD3E8}
+  .lyr.on[data-k="glonass"] .sw{background:#FF8B5E;box-shadow:0 0 7px #FF8B5E}
+  .lyr.on[data-k="galileo"] .sw{background:#B98CE0;box-shadow:0 0 7px #B98CE0}
+  .lyr.on[data-k="beidou"] .sw{background:#6BC26B;box-shadow:0 0 7px #6BC26B}
+  .lyr.on[data-k="starlink"] .sw{background:#7FA8E8;box-shadow:0 0 7px #7FA8E8}
+  .lyr.on[data-k="oneweb"] .sw{background:#4FD1B5;box-shadow:0 0 7px #4FD1B5}
+  .lyr.on[data-k="iridium"] .sw{background:#E0708F;box-shadow:0 0 7px #E0708F}
+  .lyr.on[data-k="weather"] .sw{background:#E8A23D;box-shadow:0 0 7px #E8A23D}
+  .lyr.on[data-k="station"] .sw{background:#EDEDED;box-shadow:0 0 7px #EDEDED}
+  .lyr.on[data-k="other"] .sw{background:#5A6B7C;box-shadow:0 0 5px #5A6B7C}
+  .grp{padding:6px 11px 3px;font-size:8.5px;letter-spacing:.3em;color:var(--ion);
+    border-bottom:1px solid var(--line);background:rgba(95,211,232,.05)}
+  .tag{font-size:8px;letter-spacing:.08em;padding:0 3px;border-radius:2px;vertical-align:1px;margin-left:3px}
+  .tag.live{color:#0A1018;background:var(--ok)}
+  .tag.calc{color:var(--dim);border:1px solid var(--line)}
+  #debugline{font-size:9px;color:var(--dim);opacity:.7;margin-top:5px;line-height:1.6}
+  .lyr .n{flex:1}
+  .lyr .c{font-size:10px;color:var(--dim)}
+  .lyr.off .n{color:var(--dim)}
+
+  /* ---- 左下 帰属/ライセンス ---- */
+  #src{position:absolute;left:14px;bottom:14px;z-index:10;
+    background:var(--glass);border:1px solid var(--line);border-radius:4px;
+    backdrop-filter:blur(10px);padding:9px 11px;font-size:9.5px;line-height:1.85;color:var(--dim);
+    max-width:250px}
+  #src b{color:var(--text);font-weight:600}
+  #src a{color:var(--ion);text-decoration:none}
+  #src .hd{font-size:9px;letter-spacing:.24em;color:var(--ion);margin-bottom:4px}
+
+  /* ---- 上部 実況ティッカー ---- */
+  #tick{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:10;
+    background:var(--glass);border:1px solid var(--line);border-radius:20px;
+    backdrop-filter:blur(10px);padding:6px 16px;font-size:11px;letter-spacing:.06em;
+    display:flex;gap:16px;align-items:center;white-space:nowrap}
+  #tick .v{color:var(--ion)}
+  #tick .sep{width:1px;height:11px;background:var(--line)}
+
+  /* ---- ジャンプ ---- */
+  #jump{position:absolute;right:14px;bottom:14px;z-index:10;display:flex;flex-direction:column;gap:5px;align-items:flex-end}
+  .jbtn{background:var(--glass);border:1px solid var(--line);border-radius:3px;
+    backdrop-filter:blur(10px);color:var(--text);font-size:10.5px;letter-spacing:.1em;
+    padding:6px 11px;cursor:pointer;transition:border-color .15s,color .15s;
+    font-family:inherit;text-align:right}
+  .jbtn:hover{border-color:var(--ion);color:var(--ion)}
+  .jbtn.home{color:var(--ion);border-color:rgba(95,211,232,.4)}
+
+  /* ---- ポップアップ ---- */
+  #card{position:absolute;z-index:20;background:var(--glass);border:1px solid var(--line);
+    border-radius:4px;backdrop-filter:blur(14px);padding:11px 13px;min-width:190px;
+    display:none;pointer-events:auto;box-shadow:0 8px 34px rgba(0,0,0,.7)}
+  #card .ct{font-size:13px;font-weight:700;letter-spacing:.04em;margin-bottom:2px}
+  #card .cs{font-size:9.5px;color:var(--dim);margin-bottom:7px}
+  #card .kv{display:flex;justify-content:space-between;gap:16px;font-size:11.5px;padding:1.5px 0}
+  #card .kv b{color:var(--ion);font-weight:600;font-family:"SF Mono",Menlo,monospace}
+  #card .cf{margin-top:7px;padding-top:6px;border-top:1px solid var(--line);font-size:9px;color:var(--dim)}
+  #card .cf a{color:var(--ion);text-decoration:none}
+  #card .x{position:absolute;right:7px;top:5px;color:var(--dim);cursor:pointer;font-size:15px;line-height:1}
+  #card .x:hover{color:var(--flare)}
+
+  #hint{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:10;
+    font-size:10px;color:var(--dim);letter-spacing:.14em;pointer-events:none;
+    transition:opacity .6s}
+
+  @media(max-width:700px){
+    #layers{width:160px;font-size:11px}
+    #src{display:none}
+    #tick{font-size:10px;padding:5px 11px;gap:10px}
+    #title .jp{font-size:13px}
+  }
+</style>
+</head>
+<body>
+
+<div id="globe"></div>
+
+<div id="boot">
+  <div class="t mono">ESTABLISHING ORBIT</div>
+  <div class="bar"><i></i></div>
+</div>
+
+<div id="title">
+  <span class="en mono">ORBIT</span>
+  <div class="jp">地球観測</div>
+  <div class="alt mono">OPEN DATA DIGITAL TWIN</div>
+</div>
+
+<div id="tick">
+  <span>ISS <span class="v mono" id="t-i">–</span></span>
+  <span class="sep"></span>
+  <span>地震 <span class="v mono" id="t-q">–</span></span>
+  <span class="sep"></span>
+  <span>アメダス <span class="v mono" id="t-a">–</span></span>
+  <span class="sep"></span>
+  <span class="v mono" id="t-c">--:--:--</span>
+</div>
+
+<div id="layers" class="collapsed">
+  <div id="layers-head" class="mono">レイヤ <span id="layers-chevron">▸</span></div>
+  <div id="layers-body">
+  <div class="grp mono">軌道上</div>
+  <div class="lyr on" data-k="iss"><span class="sw"></span><span class="n">ISS <span class="tag live">実測</span></span><span class="c mono" id="c-iss">–</span></div>
+  <div class="lyr on" data-k="qzss"><span class="sw"></span><span class="n">みちびき</span><span class="c mono" id="c-qzss">–</span></div>
+  <div class="lyr on" data-k="gps"><span class="sw"></span><span class="n">GPS</span><span class="c mono" id="c-gps">–</span></div>
+  <div class="lyr on" data-k="glonass"><span class="sw"></span><span class="n">GLONASS</span><span class="c mono" id="c-glonass">–</span></div>
+  <div class="lyr on" data-k="galileo"><span class="sw"></span><span class="n">Galileo</span><span class="c mono" id="c-galileo">–</span></div>
+  <div class="lyr on" data-k="beidou"><span class="sw"></span><span class="n">北斗</span><span class="c mono" id="c-beidou">–</span></div>
+  <div class="lyr on" data-k="starlink"><span class="sw"></span><span class="n">Starlink</span><span class="c mono" id="c-starlink">–</span></div>
+  <div class="lyr on" data-k="oneweb"><span class="sw"></span><span class="n">OneWeb</span><span class="c mono" id="c-oneweb">–</span></div>
+  <div class="lyr on" data-k="iridium"><span class="sw"></span><span class="n">Iridium</span><span class="c mono" id="c-iridium">–</span></div>
+  <div class="lyr on" data-k="weather"><span class="sw"></span><span class="n">気象衛星</span><span class="c mono" id="c-weather">–</span></div>
+  <div class="lyr on" data-k="station"><span class="sw"></span><span class="n">宇宙ステーション</span><span class="c mono" id="c-station">–</span></div>
+  <div class="lyr on" data-k="other"><span class="sw"></span><span class="n">その他カタログ</span><span class="c mono" id="c-other">–</span></div>
+  <div class="lyr on" data-k="track"><span class="sw"></span><span class="n">準天頂軌跡</span><span class="c mono">8字</span></div>
+  <div class="grp mono">地表</div>
+  <div class="lyr on" data-k="quake"><span class="sw"></span><span class="n">地震 24h</span><span class="c mono" id="c-quake">–</span></div>
+  <div class="lyr on" data-k="amedas"><span class="sw"></span><span class="n">アメダス実況</span><span class="c mono" id="c-amedas">–</span></div>
+  <div class="lyr on" data-k="night"><span class="sw"></span><span class="n">昼夜境界</span><span class="c mono">live</span></div>
+  </div>
+</div>
+
+<div id="src">
+  <div class="hd mono">SOURCES / LICENCE</div>
+  <b>衛星カタログ</b> <a href="https://celestrak.org/" target="_blank">CelesTrak</a> GP/TLE（GROUP=active）・GitHub Actionsが3時間毎に取得、SGP4で自前伝播<br>
+  <b>ISS</b> wheretheiss.at 実測位置（要認証なし）<br>
+  <b>地球テクスチャ</b> Natural Earth II(最下層・PD・常に欠けない)+ <a href="https://gibs.earthdata.nasa.gov/" target="_blank">NASA GIBS</a> Blue Marble(中間層)+ MODIS Terra実写(上層・ほぼ毎日更新)<br>
+  <b>地震</b> USGS Earthquake Hazards（Public Domain）<br>
+  <b>気象</b> 気象庁 アメダス（政府標準利用規約）<br>
+  <b>地点</b> <a href="https://open-meteo.com/" target="_blank">Weather data by Open-Meteo.com</a>（CC BY 4.0）<br>
+  <b>近接概形</b> ボックス(本体+パネル、ISSは実寸比)常時表示 + ISSのみ<a href="https://science.nasa.gov/resource/international-space-station-3d-model/" target="_blank">NASA VTAD 実モデル</a>を重ねて診断中(Public Domain)<br>
+  <div id="debugline" class="mono">loading…</div>
+</div>
+
+<div id="jump">
+  <button class="jbtn home">◎ 地球全体</button>
+  <button class="jbtn" id="btn-iss">ISS を追う</button>
+  <button class="jbtn" id="btn-here">📍 現在地</button>
+  <button class="jbtn" data-lon="136.91" data-lat="35.18" data-h="90000">名古屋</button>
+  <button class="jbtn" data-lon="139.77" data-lat="35.68" data-h="90000">東京</button>
+  <button class="jbtn" data-lon="138.73" data-lat="35.36" data-h="55000">富士山</button>
+</div>
+
+<div id="card"><span class="x">×</span><div id="card-body"></div></div>
+<div id="hint">ドラッグで回転 ・ ホイールで接近 ・ 地表クリックで観測</div>
+
+<script>
+'use strict';
+/* ==========================================================
+   ORBIT — 宇宙から地球へ降りるオープンデータ・ビューア
+   Cesium + USGS(PD) + 気象庁アメダス + Open-Meteo(CC BY 4.0)
+   ========================================================== */
+
+// Ion トークン不要の構成にする（オフライン地形＋PDのNatural Earth基図）
+Cesium.Ion.defaultAccessToken = undefined;
+
+// GIBS(EPSG:4326)は非標準のタイルグリッドを使う(WMTS GetCapabilities で確認済み):
+//   Level 0: 2x1,  Level 1: 3x2,  Level 2: 5x3,
+//   Level 3: 10x5, Level 4: 20x10, Level 5: 40x20, ...
+// Level 3以降はpower-of-2倍(10→20→40→80→160)で増えるため、
+// Cesiumの GeographicTilingScheme(numberOfLevelZeroTilesX:10, Y:5) を使えば
+// Cesium Level 0 = GIBS Level 3 として完全に一致する。
+// Level 0-2の低解像度域は下地の Natural Earth II が担うため問題ない。
+const gibsScheme = new Cesium.GeographicTilingScheme({
+  numberOfLevelZeroTilesX: 10,
+  numberOfLevelZeroTilesY: 5
+});
+
+const viewer = new Cesium.Viewer('globe', {
+  // 最下層はCesium同梱Natural Earth II(標準スキームのみ使用、絶対に欠けない)。
+  imageryProvider: new Cesium.TileMapServiceImageryProvider({
+    url: Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII')
+  }),
+  baseLayerPicker:false, geocoder:false, homeButton:false, sceneModePicker:false,
+  navigationHelpButton:false, animation:false, timeline:false, fullscreenButton:false,
+  infoBox:false, selectionIndicator:false, requestRenderMode:false,
+  contextOptions:{ webgl:{ alpha:false } }
+});
+
+const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
+
+// Blue Marble(中間層)。gibsScheme(10x5起点)でCesiumの幾何/UV計算をGIBSの実グリッドに一致させる。
+// URL中の {z} はCesiumレベルなので、customTags {gz} で +3 してGIBSレベルに変換する。
+// 500m TileMatrixSet: GIBS Level 3-7 = Cesium Level 0-4
+(function addBlueMarbleLayer(){
+  try{
+    const bm = new Cesium.UrlTemplateImageryProvider({
+      url: 'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/BlueMarble_NextGeneration/default/500m/{gz}/{y}/{x}.jpg',
+      tilingScheme: gibsScheme,
+      maximumLevel: 4,
+      customTags: { gz: function(p, x, y, level){ return level + 3; } },
+      credit: new Cesium.Credit('NASA EOSDIS GIBS / Blue Marble Next Generation')
+    });
+    let bmMissCount = 0;
+    bm.errorEvent.addEventListener(()=>{
+      bmMissCount++;
+      if (bmMissCount === 1 || bmMissCount % 50 === 0)
+        console.info(`[orbit] Blue Marble: タイル欠損検出(${bmMissCount}件目)`);
+    });
+    viewer.imageryLayers.addImageryProvider(bm);
+    console.info('[orbit] Blue Marbleレイヤ(中間層・GIBSグリッド直接対応)をNatural Earth II上に追加');
+  }catch(e){
+    console.warn('[orbit] Blue Marbleレイヤ追加失敗。Natural Earth IIのみで継続します。', e);
+  }
+})();
+
+/* ---- 地球テクスチャ：3層構成 ----
+   最下層: Cesium同梱 Natural Earth II(標準スキーム、絶対に欠けない)
+   中間層: NASA Blue Marble Next Generation（雲なし・静的な合成写真）
+   上層  : NASA GIBS MODIS Terra 真色画像（実際の雲入り、ほぼ毎日更新）
+
+   GIBSのEPSG:4326タイルグリッドは非標準(Level 0: 2x1, 1: 3x2, 2: 5x3, 3: 10x5, ...)。
+   Level 3以降はpower-of-2倍なので、gibsScheme(10x5起点)でCesium Level 0 = GIBS Level 3
+   として完全に一致させる。Level 0-2の低解像度はNatural Earth IIが担う。
+
+   NASA公式ブログ曰く「衛星は東から西へ軌道を回りながら撮影するため、
+   当日UTC分のタイルの多くはまだ空」とのことで、UTC前日を指定しても
+   東経側(日本を含む)がまだ欠けていることがある(400 Bad Requestで判明)。
+   そのため2日前まで安全マージンを取り、かつ欠損自体は仕様通りの挙動なので
+   Cesiumの既定のコンソールエラー出力は黙らせて自前で1行だけ状況を出す。 */
+// 250m TileMatrixSet: GIBS Level 3-8 = Cesium Level 0-5
+(function addGibsTrueColorLayer(){
+  try{
+    const d = new Date(Date.now() - 2*86400000);
+    const dateStr = d.toISOString().slice(0,10);
+    const gibs = new Cesium.UrlTemplateImageryProvider({
+      url: `https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${dateStr}/250m/{gz}/{y}/{x}.jpg`,
+      tilingScheme: gibsScheme,
+      maximumLevel: 5,
+      customTags: { gz: function(p, x, y, level){ return level + 3; } },
+      credit: new Cesium.Credit('NASA EOSDIS GIBS / MODIS Terra Corrected Reflectance (' + dateStr + ')')
+    });
+    let gibsMissCount = 0;
+    gibs.errorEvent.addEventListener(()=>{
+      gibsMissCount++;
+      if (gibsMissCount === 1 || gibsMissCount % 50 === 0){
+        console.info(`[orbit] GIBS実写: 一部タイル欠損(${gibsMissCount}件, 下地で代替表示中)`);
+      }
+    });
+    viewer.imageryLayers.addImageryProvider(gibs);
+    console.info('[orbit] GIBS実写(雲入り)レイヤをBlue Marble上に追加:', dateStr);
+  }catch(e){
+    console.warn('[orbit] GIBS実写レイヤ追加失敗。Blue Marbleのみで継続します。', e);
+  }
+})();
+
+/* ---- 宇宙らしい見た目 ---- */
+scene.skyAtmosphere.show = true;
+scene.skyAtmosphere.hueShift = -0.02;
+scene.skyAtmosphere.saturationShift = 0.12;
+scene.skyAtmosphere.brightnessShift = 0.06;
+globe.showGroundAtmosphere = true;
+globe.atmosphereLightIntensity = 8.0;
+globe.enableLighting = true;              // 昼夜境界
+globe.baseColor = Cesium.Color.fromCssColorString('#0A1424');
+scene.globe.depthTestAgainstTerrain = false;
+scene.fog.enabled = true; scene.fog.density = 0.00012;
+scene.postProcessStages.fxaa.enabled = true;
+viewer.clock.currentTime = Cesium.JulianDate.now();
+viewer.clock.shouldAnimate = true;
+
+/* ---- 起動アニメーション：宇宙の彼方から日本へ寄る ---- */
+camera.setView({
+  destination: Cesium.Cartesian3.fromDegrees(137.0, 20.0, 34000000),
+  orientation:{ heading:0, pitch:Cesium.Math.toRadians(-90), roll:0 }
+});
+viewer.scene.globe.tileLoadProgressEvent.addEventListener(function once(n){
+  if (n > 0) return;
+  viewer.scene.globe.tileLoadProgressEvent.removeEventListener(once);
+  const b = document.getElementById('boot');
+  if (!b) return;
+  b.style.opacity = 0;
+  setTimeout(()=>b.remove(), 1200);
+  camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(137.5, 30.0, 12000000),
+    orientation:{ heading:0, pitch:Cesium.Math.toRadians(-72), roll:0 },
+    duration: 4.2, easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT
+  });
+});
+setTimeout(()=>{ const b=document.getElementById('boot'); if(b){ b.style.opacity=0; setTimeout(()=>b.remove(),1200);} }, 6000);
+
+/* ---- 慣性回転（操作するまで） ---- */
+let idle = true, lastT = Date.now();
+['LEFT_DOWN','WHEEL','PINCH_START','RIGHT_DOWN','MIDDLE_DOWN'].forEach(()=>{});
+scene.canvas.addEventListener('pointerdown', ()=>{ idle=false; fadeHint(); });
+scene.canvas.addEventListener('wheel', ()=>{ idle=false; fadeHint(); }, {passive:true});
+viewer.clock.onTick.addEventListener(()=>{
+  const now = Date.now(), dt = (now-lastT)/1000; lastT = now;
+  if (idle && camera.positionCartographic.height > 8000000) camera.rotate(Cesium.Cartesian3.UNIT_Z, -dt*0.012);
+});
+let hintGone=false;
+function fadeHint(){ if(hintGone)return; hintGone=true;
+  const h=document.getElementById('hint'); if(h){h.style.opacity=0; setTimeout(()=>h.remove(),700);} }
+setTimeout(fadeHint, 9000);
+
+/* ---- 時計 ---- */
+setInterval(()=>{ document.getElementById('t-c').textContent =
+  new Date().toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour12:false}); },1000);
+
+/* ---- データ層 ---- */
+const quakeDS  = new Cesium.CustomDataSource('quake');
+const amedasDS = new Cesium.CustomDataSource('amedas');
+viewer.dataSources.add(quakeDS);
+viewer.dataSources.add(amedasDS);
+
+const depthColor = d =>
+  d < 70  ? Cesium.Color.fromCssColorString('#FF6B3D') :
+  d < 300 ? Cesium.Color.fromCssColorString('#FFC94D') :
+            Cesium.Color.fromCssColorString('#5B8CE8');
+
+/* ============================================================
+   キャッシュ / バックオフ基盤
+   ここは claude.ai のアーティファクトサンドボックスではなく、
+   自分の GitHub Pages 上の静的サイトなので localStorage を使う。
+   タブを閉じても・再訪しても鮮度内なら再フェッチせず即描画できる。
+   ============================================================ */
+const LS_PREFIX = 'orbit:';
+function lsGet(k){ try{ const v = localStorage.getItem(LS_PREFIX+k); return v!=null ? JSON.parse(v) : null; }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(LS_PREFIX+k, JSON.stringify(v)); return true; }catch(e){ console.warn('[orbit] localStorage set failed for', k, e); return false; } }
+function lsDel(k){ try{ localStorage.removeItem(LS_PREFIX+k); }catch(e){} }
+
+const TTL = { amedas: 4*60*1000, quake: 4*60*1000, probe: 10*60*1000 };
+const cache = {
+  amedasStamp: lsGet('amedasStamp'), amedasAt: lsGet('amedasAt') || 0,
+  quakeAt: lsGet('quakeAt') || 0,
+  probe:new Map(),  // key: "lat,lon"(0.01°丸め) → {at, html}（localStorageにも個別キーでミラー）
+  elev:new Map()
+};
+const backoff = { amedas:TTL.amedas, quake:TTL.quake, iss:5000 };
+const BACKOFF_MAX = 10*60*1000, ISS_BACKOFF_MAX = 60*1000;
+
+let tabVisible = !document.hidden;
+document.addEventListener('visibilitychange', ()=>{
+  tabVisible = !document.hidden;
+  if (tabVisible) { pollISS(); observeAll(); } // 復帰時のみ鮮度確認、隠れてる間は静止
+});
+
+function probeKey(lat, lon){ return lat.toFixed(2)+','+lon.toFixed(2); }
+
+/* 地震・アメダスは、localStorageに前回の描画結果そのものを保存しておき、
+   ページ再訪時にTTL内ならネットワークへ一切出ずに即座に復元描画する。 */
+function restoreQuakesFromCache(){
+  const g = lsGet('quakeGeojson');
+  if (!g) return false;
+  renderQuakes(g);
+  document.getElementById('c-quake').textContent = g.features.length + ' (cache)';
+  return true;
+}
+function restoreAmedasFromCache(){
+  const a = lsGet('amedasSnapshot');
+  if (!a) return false;
+  if (!amedasMeta) amedasMeta = lsGet('amedasMeta'); // メタ(観測局リスト)も先に復元しないと描画できない
+  if (!amedasMeta) return false; // メタ未取得ならここでは復元せず通常フローに任せる
+  renderAmedas(a.obs, a.stamp);
+  return true;
+}
+
+
+function renderQuakes(gj){
+  quakeDS.entities.removeAll();
+  gj.features.forEach(f=>{
+    const [lon,lat,dep] = f.geometry.coordinates;
+    const m = f.properties.mag || 2.5;
+    const col = depthColor(dep ?? 10);
+    quakeDS.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+      point:{
+        pixelSize: 4 + Math.pow(Math.max(m,1), 2.0) * 0.85,
+        color: col.withAlpha(0.42),
+        outlineColor: col, outlineWidth: 1.4,
+        scaleByDistance:new Cesium.NearFarScalar(3e5,1.9, 2.5e7,0.65),
+        translucencyByDistance:new Cesium.NearFarScalar(3e5,1.0, 4e7,0.6),
+        disableDepthTestDistance: 10000 // 10km以内(地上での接写)のみ深度テスト無効。それ以遠は地球儀に正しく遮蔽される
+      },
+      properties:{ kind:'quake', mag:m, depth:dep, place:f.properties.place, time:f.properties.time }
+    });
+  });
+  document.getElementById('c-quake').textContent = gj.features.length;
+  document.getElementById('t-q').textContent = gj.features.length + '件';
+}
+
+/* ---- USGS 地震（localStorage永続キャッシュ + 失敗時バックオフ） ---- */
+async function loadQuakes(){
+  if (!tabVisible) return;
+  const now = Date.now();
+  if (now - cache.quakeAt < backoff.quake) return; // 通常TTL、失敗時は倍化した間隔まで待つ
+  cache.quakeAt = now; lsSet('quakeAt', now); // 試行タイムスタンプを先に更新し、二重fetchを防ぐ
+  try{
+    const gj = await (await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson')).json();
+    renderQuakes(gj);
+    lsSet('quakeGeojson', gj);
+    backoff.quake = TTL.quake; // 成功したら通常間隔に戻す
+  }catch(e){
+    document.getElementById('c-quake').textContent='×';
+    backoff.quake = Math.min(backoff.quake * 2, BACKOFF_MAX); // 失敗のたび間隔を倍化
+    console.warn('quake fetch failed, backing off to', backoff.quake, e);
+  }
+}
+
+/* ---- 気象庁アメダス（新規スタンプの時だけ本体を取得 + バックオフ） ---- */
+const tempColor = t =>
+  t <= 0  ? '#5B8CE8' : t < 10 ? '#5FD3E8' : t < 20 ? '#5FE0A0' :
+  t < 28 ? '#FFC94D' : '#FF6B3D';
+let amedasMeta = null;
+
+function renderAmedas(obs, stamp){
+  amedasDS.entities.removeAll();
+  const d = new Date(
+    +stamp.slice(0,4), +stamp.slice(4,6)-1, +stamp.slice(6,8), +stamp.slice(8,10), +stamp.slice(10,12));
+  let n=0;
+  for(const [id,v] of Object.entries(obs)){
+    const meta = amedasMeta && amedasMeta[id];
+    if(!meta || !v.temp || v.temp[1]!==0) continue;
+    const t = v.temp[0];
+    const c = Cesium.Color.fromCssColorString(tempColor(t));
+    amedasDS.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(meta.lon[0]+meta.lon[1]/60, meta.lat[0]+meta.lat[1]/60, 0),
+      point:{
+        pixelSize:7, color:c.withAlpha(0.85),
+        outlineColor:Cesium.Color.fromCssColorString('#05070C').withAlpha(0.7), outlineWidth:0.8,
+        scaleByDistance:new Cesium.NearFarScalar(5e4,1.6, 3e6,0.35),
+        translucencyByDistance:new Cesium.NearFarScalar(5e4,1.0, 5e6,0.0),
+        disableDepthTestDistance: 10000 // 10km以内のみ深度テスト無効。それ以遠は地球儀に正しく遮蔽される
+      },
+      properties:{ kind:'amedas', name:meta.kjName||id, temp:t,
+        wind:(v.wind&&v.wind[1]===0)?v.wind[0]:null,
+        rain:(v.precipitation1h&&v.precipitation1h[1]===0)?v.precipitation1h[0]:null,
+        hum:(v.humidity&&v.humidity[1]===0)?v.humidity[0]:null }
+    });
+    n++;
+  }
+  document.getElementById('c-amedas').textContent = n;
+  document.getElementById('t-a').textContent =
+    d.toLocaleTimeString('ja-JP',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit',hour12:false});
+}
+
+async function loadAmedas(){
+  if (!tabVisible) return;
+  const now = Date.now();
+  if (now - cache.amedasAt < backoff.amedas) return;
+  cache.amedasAt = now; lsSet('amedasAt', now);
+  try{
+    if(!amedasMeta){
+      const cachedMeta = lsGet('amedasMeta');
+      amedasMeta = cachedMeta || await (await fetch('https://www.jma.go.jp/bosai/amedas/const/amedastable.json')).json();
+      if(!cachedMeta) lsSet('amedasMeta', amedasMeta); // 観測局リストはほぼ不変なので永続保存
+    }
+    const latest = (await (await fetch('https://www.jma.go.jp/bosai/amedas/data/latest_time.txt')).text()).trim();
+    const d = new Date(latest), p = n=>String(n).padStart(2,'0');
+    const stamp = `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}00`;
+
+    // 観測局のタイムスタンプが前回と同じなら本体(map JSON)は取りに行かない
+    if (stamp === cache.amedasStamp) { backoff.amedas = TTL.amedas; return; }
+
+    const obs = await (await fetch(`https://www.jma.go.jp/bosai/amedas/data/map/${stamp}.json`)).json();
+    renderAmedas(obs, stamp);
+    cache.amedasStamp = stamp; lsSet('amedasStamp', stamp);
+    lsSet('amedasSnapshot', { obs, stamp });
+    backoff.amedas = TTL.amedas;
+  }catch(e){
+    document.getElementById('c-amedas').textContent='×';
+    backoff.amedas = Math.min(backoff.amedas * 2, BACKOFF_MAX);
+    console.warn('amedas fetch failed, backing off to', backoff.amedas, e);
+  }
+}
+
+/* ============================================================
+   衛星カタログ：CelesTrak GP/TLE(GROUP=active) を GitHub Actions が
+   3時間ごとに取得・コミットした data/active.tle を同一オリジンから読み、
+   satellite.js の SGP4 でブラウザ内リアル伝播する。
+   CelesTrak は gp.php で CORS を無効化しているためブラウザ直叩き不可
+   → サーバー側(Actions)取得＋静的配信でCORSと負荷の両方を回避。
+   ============================================================ */
+const trackDS = new Cesium.CustomDataSource('track');
+const issDS   = new Cesium.CustomDataSource('iss');
+viewer.dataSources.add(trackDS);
+viewer.dataSources.add(issDS);
+
+const CAT = {
+  qzss:    { re:/^QZS/i,                                          css:'#FFC94D', size:6, label:'みちびき' },
+  gps:     { re:/^(GPS|NAVSTAR)/i,                                 css:'#5FD3E8', size:3, label:'GPS' },
+  glonass: { re:/^(GLONASS|COSMOS 2)/i,                            css:'#FF8B5E', size:3, label:'GLONASS' },
+  galileo: { re:/^GALILEO/i,                                       css:'#B98CE0', size:3, label:'Galileo' },
+  beidou:  { re:/^(BEIDOU|BDS)/i,                                  css:'#6BC26B', size:3, label:'北斗' },
+  starlink:{ re:/^STARLINK/i,                                      css:'#7FA8E8', size:2, label:'Starlink' },
+  oneweb:  { re:/^ONEWEB/i,                                        css:'#4FD1B5', size:2, label:'OneWeb' },
+  iridium: { re:/^IRIDIUM/i,                                       css:'#E0708F', size:3, label:'Iridium' },
+  weather: { re:/^(NOAA|GOES|HIMAWARI|METEOSAT|METOP|FENGYUN)/i,   css:'#E8A23D', size:4, label:'気象衛星' },
+  station: { re:/^(ISS|TIANGONG|CSS)/i,                            css:'#EDEDED', size:5, label:'宇宙ステーション' },
+  other:   { re:null,                                              css:'#5A6B7C', size:2, label:'その他' }
+};
+function classify(name){
+  for(const k of Object.keys(CAT)) if(CAT[k].re && CAT[k].re.test(name)) return k;
+  return 'other';
+}
+
+const catalogue = { satrecs:[], names:[], cats:[], points:null, catIndex:{}, meta:null };
+const TLE_TTL = 3*60*60*1000; // Actionsの取得間隔(3h)に合わせる
+
+async function loadCatalogue(){
+  const t0 = performance.now();
+  let text, meta;
+  const cachedMeta = lsGet('tleMeta');
+  const now = Date.now();
+
+  if (cachedMeta && cachedMeta.cachedAt && (now - cachedMeta.cachedAt) < TLE_TTL) {
+    const cachedText = lsGet('tleText');
+    if (cachedText) { text = cachedText; meta = cachedMeta; console.info('[orbit] TLE: localStorageキャッシュを使用', meta); }
+  }
+  if (!text) {
+    try{
+      const [t, m] = await Promise.all([
+        fetch('data/active.tle').then(r=>{ if(!r.ok) throw new Error('active.tle '+r.status); return r.text(); }),
+        fetch('data/meta.json').then(r=>{ if(!r.ok) throw new Error('meta.json '+r.status); return r.json(); })
+      ]);
+      text = t; meta = { ...m, cachedAt: now };
+      const stored = lsSet('tleText', text) && lsSet('tleMeta', meta);
+      console.info('[orbit] TLE: ネットワーク取得', meta, 'localStorage保存:', stored);
+    }catch(e){
+      console.warn('[orbit] TLE取得失敗（Actionsの初回実行がまだ走っていない可能性）', e);
+      document.getElementById('debugline').textContent = '衛星カタログ準備中…（GitHub Actionsの初回取得待ち、数分後に再読込してください）';
+      return;
+    }
+  }
+
+  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  const catIndex = {}; Object.keys(CAT).forEach(k=>catIndex[k]=[]);
+  const points = new Cesium.PointPrimitiveCollection();
+  scene.primitives.add(points);
+
+  for(let i=0; i+2<lines.length; i+=3){
+    const name = lines[i], l1 = lines[i+1], l2 = lines[i+2];
+    if (l1[0]!=='1' || l2[0]!=='2') continue;
+    if (name.indexOf('ISS (ZARYA)')===0) continue; // ISSは専用の実測エンティティで表示するため除外
+    let satrec;
+    try{ satrec = satellite.twoline2satrec(l1, l2); }catch(e){ continue; }
+    if (!satrec) continue;
+    const cat = classify(name);
+    const idx = catalogue.satrecs.length;
+    catalogue.satrecs.push(satrec);
+    catalogue.names.push(name);
+    catalogue.cats.push(cat);
+    catIndex[cat].push(idx);
+    const c = Cesium.Color.fromCssColorString(CAT[cat].css);
+    points.add({
+      position: Cesium.Cartesian3.ZERO,
+      pixelSize: CAT[cat].size,
+      color: c.withAlpha(0.8),
+      id: { kind:'bulkSat', index: idx }
+    });
+  }
+  catalogue.points = points;
+  catalogue.catIndex = catIndex;
+  catalogue.meta = meta;
+
+  Object.keys(CAT).forEach(k=>{
+    const el = document.getElementById('c-'+k);
+    if (el) el.textContent = catIndex[k].length.toLocaleString();
+  });
+
+  const dt = (performance.now()-t0).toFixed(0);
+  console.info(`[orbit] カタログ解析完了: ${catalogue.satrecs.length}機 (${dt}ms)`);
+  updateDebugLine();
+  updateAllPositions();
+  drawQzsTrack();
+}
+
+function updateDebugLine(){
+  const m = catalogue.meta;
+  const dl = document.getElementById('debugline');
+  if (!m){ dl.textContent = ''; return; }
+  const age = Math.round((Date.now() - new Date(m.generated_at).getTime())/60000);
+  dl.textContent = `カタログ ${catalogue.satrecs.length.toLocaleString()}機 ・ 取得(Actions) ${age}分前 ・ ${m.generated_at.slice(0,16).replace('T',' ')}UTC`;
+}
+
+/* --- 位置更新：eciToEcf は GMST回転のみでCesiumのECEF Cartesian3とそのまま整合 --- */
+function updateAllPositions(){
+  if (!catalogue.points) return;
+  const now = new Date();
+  const gmst = satellite.gstime(now);
+  const pts = catalogue.points;
+  for(let i=0;i<catalogue.satrecs.length;i++){
+    let pv;
+    try{ pv = satellite.propagate(catalogue.satrecs[i], now); }catch(e){ continue; }
+    if (!pv || !pv.position) continue; // 減衰・軌道消失など
+    const ecf = satellite.eciToEcf(pv.position, gmst);
+    const p = pts.get(i);
+    p.position = Cesium.Cartesian3.fromElements(ecf.x*1000, ecf.y*1000, ecf.z*1000, p.position);
+  }
+}
+setInterval(()=>{ if(tabVisible) updateAllPositions(); }, 2000);
+
+/* --- みちびき準天頂軌跡：実TLEを1恒星日ぶん伝播して8字を描く --- */
+function drawQzsTrack(){
+  const qi = catalogue.catIndex.qzss && catalogue.catIndex.qzss[0];
+  if (qi === undefined) return;
+  const satrec = catalogue.satrecs[qi];
+  const pts = [];
+  const start = Date.now();
+  for(let k=0;k<=288;k++){
+    const t = new Date(start + k*300000); // 5分刻み×288 = 24h
+    const gmst = satellite.gstime(t);
+    let pv; try{ pv = satellite.propagate(satrec, t); }catch(e){ continue; }
+    if (!pv || !pv.position) continue;
+    const geo = satellite.eciToGeodetic(pv.position, gmst);
+    pts.push(Cesium.Math.toDegrees(geo.longitude), Cesium.Math.toDegrees(geo.latitude));
+  }
+  if (pts.length < 4) return;
+  trackDS.entities.add({
+    polyline:{
+      positions: Cesium.Cartesian3.fromDegreesArray(pts),
+      width: 1.6, clampToGround: false,
+      material: new Cesium.PolylineGlowMaterialProperty({
+        glowPower:0.22, color: Cesium.Color.fromCssColorString('#FFC94D').withAlpha(0.55) })
+    }
+  });
+}
+
+loadCatalogue();
+setInterval(()=>{ if(tabVisible) loadCatalogue(); }, TLE_TTL); // Actionsの更新周期と同期
+
+/* ============================================================
+   ISS：実測位置（wheretheiss.at, 認証不要）
+   ============================================================ */
+let issShown = null, issMeta = null;
+let issHeading = 0, issPrevLat = null, issPrevLon = null; // 実測lat/lonの差分から進行方位(bearing)を算出
+let issFixTime = null, issFixLat = null, issFixLon = null, issFixAlt = null, issSpeedKmh = 0; // 直近の実測値(推測航法の起点)
+const ISS_R = 6371 + 408; // 平均軌道半径(km)。地表半径ではなくISS高度分を足したもの
+
+// ISSの位置を「任意時刻(過去/未来問わず)」の関数として計算する純粋関数。
+// fly-toで「今の位置」ではなく「到着予定時刻の予測位置」に飛べるようにするため、
+// 単なる状態変数ではなく時刻引数を受け取る形にしてある(秒速7.66kmで動く相手に
+// 静止点めがけて飛ぶと、着いた頃には対象はとっくに先へ進んでしまうため)。
+function issPositionAt(dateMs, result){
+  if (issFixTime == null) return undefined;
+  const dtH = (dateMs - issFixTime) / 3600000;
+  const distKm = issSpeedKmh * dtH;
+  const δ = distKm / ISS_R;
+  const φ1 = issFixLat*Math.PI/180, λ1 = issFixLon*Math.PI/180, θ = issHeading;
+  const φ2 = Math.asin(Math.sin(φ1)*Math.cos(δ) + Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
+  const λ2 = λ1 + Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1), Math.cos(δ) - Math.sin(φ1)*Math.sin(φ2));
+  return Cesium.Cartesian3.fromDegrees(λ2*180/Math.PI, φ2*180/Math.PI, issFixAlt*1000, undefined, result);
+}
+
+// ISSの向き。実測lat/lonの逐次差分から大圏方位(forward azimuth)を計算し、それを姿勢として使う。
+const issOrientation = new Cesium.CallbackProperty((time, result)=>{
+  if (!issShown) return undefined;
+  return Cesium.Transforms.headingPitchRollQuaternion(
+    issShown, new Cesium.HeadingPitchRoll(issHeading, 0, 0), Cesium.Ellipsoid.WGS84, undefined, result);
+}, false);
+
+// 常にissShown(tickハンドラが Date.now() 基準で計算した唯一の正)を返すだけにする。
+// 以前は呼ばれるたびに issPositionAt() で再計算していたが、追従カメラ側は
+// viewer.clock.currentTime を、表示側は Date.now() を基準にしていて、
+// 秒速7.66kmの相手だとこの2つの時刻ソースのわずかなズレが接写時に
+// 数十m級のガタつきとして見えてしまっていた。単一の値を両方が参照する形にして解消。
+const issPositionProp = new Cesium.CallbackProperty((time, result)=>{
+  return issShown ? Cesium.Cartesian3.clone(issShown, result) : undefined;
+}, false);
+
+const issEntity = issDS.entities.add({
+  position: issPositionProp,
+  point:{ pixelSize:9, color:Cesium.Color.WHITE,
+    outlineColor:Cesium.Color.WHITE.withAlpha(0.3), outlineWidth:8,
+    scaleByDistance:new Cesium.NearFarScalar(5e5,1.6, 5e7,0.7) },
+  label:{ text:'ISS', font:'700 12px "SF Mono",Menlo,monospace',
+    fillColor:Cesium.Color.WHITE, showBackground:true,
+    backgroundColor:Cesium.Color.fromCssColorString('#05070C').withAlpha(0.66),
+    backgroundPadding:new Cesium.Cartesian2(5,3),
+    pixelOffset:new Cesium.Cartesian2(0,-17) },
+  properties:{ kind:'iss' }
+});
+// 可視範囲（フットプリント）
+const issRing = issDS.entities.add({
+  position:new Cesium.CallbackProperty(()=>{
+    if(!issShown) return undefined;
+    const c = Cesium.Cartographic.fromCartesian(issShown);
+    return Cesium.Cartesian3.fromRadians(c.longitude, c.latitude, 0);
+  }, false),
+  ellipse:{ semiMajorAxis:0, semiMinorAxis:0, height:0,
+    material:Cesium.Color.WHITE.withAlpha(0.05),
+    outline:true, outlineColor:Cesium.Color.WHITE.withAlpha(0.28), outlineWidth:1 }
+});
+
+let issPollTimer = null;
+async function pollISS(){
+  if (!tabVisible) return; // タブが見えてない間は叩かない
+  clearTimeout(issPollTimer);
+  try{
+    const d = await (await fetch('https://api.wheretheiss.at/v1/satellites/25544')).json();
+    issMeta = d;
+    if (issPrevLat != null){
+      const φ1=issPrevLat*Math.PI/180, φ2=d.latitude*Math.PI/180, Δλ=(d.longitude-issPrevLon)*Math.PI/180;
+      const y = Math.sin(Δλ)*Math.cos(φ2);
+      const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+      if (Math.hypot(y,x) > 1e-9) issHeading = Math.atan2(y, x); // 大圏方位(forward azimuth)
+    }
+    issPrevLat = d.latitude; issPrevLon = d.longitude;
+    issFixTime = Date.now(); issFixLat = d.latitude; issFixLon = d.longitude; issFixAlt = d.altitude;
+    issSpeedKmh = d.velocity;
+    if(!issShown) issShown = issPositionAt(issFixTime);
+    const r = d.footprint*1000/2;
+    issRing.ellipse.semiMajorAxis = r;
+    issRing.ellipse.semiMinorAxis = r;
+    document.getElementById('c-iss').textContent = Math.round(d.altitude)+'km';
+    document.getElementById('t-i').textContent =
+      `${d.latitude.toFixed(1)}, ${d.longitude.toFixed(1)} / ${Math.round(d.velocity).toLocaleString()}km/h`;
+    backoff.iss = 5000; // wheretheiss.at の目安レート上限(約1req/秒)に対し十分余裕を持った間隔
+  }catch(e){
+    document.getElementById('c-iss').textContent='×';
+    document.getElementById('t-i').textContent='取得不可';
+    backoff.iss = Math.min(backoff.iss * 2, ISS_BACKOFF_MAX);
+    console.warn('ISS fetch failed, backing off to', backoff.iss, e);
+  }
+  issPollTimer = setTimeout(pollISS, backoff.iss);
+}
+pollISS();
+
+// ポーリング間は実測速度+進行方位から大圏航法で推測航行し、なめらかに連続移動させる
+// (単純なlerpだと「新しい実測値へ素早く追いつき、その後静止」を繰り返しカクついて見える)。
+// scene.preUpdate で更新することで、Cesium内部のtrackedEntity/カメラ追従処理が
+// このフレームの位置を参照する前に確実にissShownが最新化されているようにする
+// (viewer.clock.onTickだと内部処理より後に発火し、1フレーム分ズレることがあった)。
+let issModelDiagLogged = false;
+scene.preUpdate.addEventListener(()=>{
+  if (issFixTime == null) return;
+  issShown = issPositionAt(Date.now(), issShown || undefined);
+
+  if (issModel){
+    const showModel = selection.kind === 'iss' &&
+      Cesium.Cartesian3.distance(camera.positionWC, issShown) < NEAR_DIST;
+    issModel.show = showModel;
+    if (showModel){
+      const hpr = new Cesium.HeadingPitchRoll(issHeading, 0, 0);
+      const placed = Cesium.Transforms.headingPitchRollToFixedFrame(
+        issShown, hpr, Cesium.Ellipsoid.WGS84, undefined, new Cesium.Matrix4());
+      if (issModelState === 'ready' && issModelLocalCenter){
+        // 重心オフセット補正が取得済みなら、見た目の重心がissShownに一致するよう平行移動を補正する
+        const rot = Cesium.Matrix4.getMatrix3(placed, new Cesium.Matrix3());
+        const rotatedOffset = Cesium.Matrix3.multiplyByVector(rot, issModelLocalCenter, new Cesium.Cartesian3());
+        const correctedTranslation = Cesium.Cartesian3.subtract(issShown, rotatedOffset, new Cesium.Cartesian3());
+        issModel.modelMatrix = Cesium.Matrix4.setTranslation(placed, correctedTranslation, issModel.modelMatrix);
+        if (!issModelDiagLogged){
+          issModelDiagLogged = true;
+          console.info('[orbit] ISSモデル配置診断:', {
+            issShown: { x:issShown.x, y:issShown.y, z:issShown.z },
+            issModelLocalCenter: { x:issModelLocalCenter.x, y:issModelLocalCenter.y, z:issModelLocalCenter.z },
+            correctedTranslation: { x:correctedTranslation.x, y:correctedTranslation.y, z:correctedTranslation.z },
+            modelBoundingSphereAfterPlacement: issModel.boundingSphere ? {
+              center: { x: issModel.boundingSphere.center.x, y: issModel.boundingSphere.center.y, z: issModel.boundingSphere.center.z },
+              radius: issModel.boundingSphere.radius,
+              distanceFromIntendedPos: Cesium.Cartesian3.distance(issModel.boundingSphere.center, issShown)
+            } : 'boundingSphere未取得'
+          });
+        }
+      } else {
+        // まだ補正値が取れていない間は、原点をそのままissShownに置いた粗い位置で表示する
+        issModel.modelMatrix = Cesium.Matrix4.clone(placed, issModel.modelMatrix);
+      }
+    }
+    // ボックスは常時表示のまま(モデルとの位置比較用、および万一モデルが見えなくても何かは必ず見える保険)
+  }
+});
+
+/* ============================================================
+   選択オブジェクトへのフライイン + 近接時の概形表示
+   衛星の正確なCADモデルは存在しない(取得もできない)ので、
+   ここで見せているのは「本体+太陽電池パネル」の簡略化した代表シルエット。
+   ISSだけは実寸に近い比率(全長約109m×パネル展張約73m)にして、
+   汎用衛星(数m級)とスケールで区別がつくようにしている。
+   ============================================================ */
+const shapeDS = new Cesium.CustomDataSource('shape');
+viewer.dataSources.add(shapeDS);
+const NEAR_DIST = 8000; // この距離より近いと概形表示、遠いとドット表示
+
+const selection = { kind:null, pointRef:null, entities:[] };
+
+function clearSelection(){
+  if (selection.pointRef) selection.pointRef.distanceDisplayCondition = undefined;
+  if (selection.kind === 'iss') issEntity.point.distanceDisplayCondition = undefined;
+  selection.entities.forEach(e=>shapeDS.entities.remove(e));
+  selection.entities = [];
+  selection.kind = null; selection.pointRef = null;
+  followTarget = null; followLastPos = null;
+  if (catalogue.points && !groundMode) catalogue.points.show = true; // 接写用に隠していた衛星群を復元
+  btnIss.textContent = 'ISS を追う';
+  btnIss.classList.remove('home');
+}
+
+// 自前の追従カメラ：対象の位置が1フレームで動いた分だけカメラも同じ量だけ平行移動させる。
+// Cesium標準のtrackedEntity/EntityViewは内部でcamera.transformを毎フレーム強制的に
+// 上書きするため、こちらの独自flyToBoundingSphereアニメーションや、ユーザーの
+// 手動ドラッグ操作(通常はcamera.position/orientationを直接操作する)と競合し、
+// ①ガクつく ②視点変更が一切効かなくなる、という2つの不具合を引き起こすことが
+// 実機で確認された。position(camera.transformには触らない)だけを動かすこの方式なら
+// どちらとも衝突しない。scene.postUpdateでカメラ操作が確定した後に追従分を上乗せする。
+let followTarget = null, followLastPos = null;
+scene.postUpdate.addEventListener(()=>{
+  if (!followTarget) return;
+  const pos = followTarget.getValue(viewer.clock.currentTime);
+  if (!pos) return;
+  if (followLastPos){
+    const delta = Cesium.Cartesian3.subtract(pos, followLastPos, new Cesium.Cartesian3());
+    if (Cesium.Cartesian3.magnitudeSquared(delta) > 1e-6){
+      camera.position = Cesium.Cartesian3.add(camera.position, delta, camera.position);
+    }
+  }
+  followLastPos = Cesium.Cartesian3.clone(pos, followLastPos);
+});
+
+function makeSatPositionProperty(satrec){
+  return new Cesium.CallbackProperty((time, result)=>{
+    try{
+      const jsTime = Cesium.JulianDate.toDate(time);
+      const gmst = satellite.gstime(jsTime);
+      const pv = satellite.propagate(satrec, jsTime);
+      if (pv && pv.position){
+        const ecf = satellite.eciToEcf(pv.position, gmst);
+        return Cesium.Cartesian3.fromElements(ecf.x*1000, ecf.y*1000, ecf.z*1000, result);
+      }
+    }catch(e){}
+    return result || new Cesium.Cartesian3(); // 伝播失敗時もundefinedは返さない
+  }, false);
+}
+
+function addShapeBox(positionProp, orientation, dims, css, alpha){
+  return shapeDS.entities.add({
+    position: positionProp, orientation,
+    box:{ dimensions:dims, material:Cesium.Color.fromCssColorString(css).withAlpha(alpha),
+      outline:true, outlineColor:Cesium.Color.BLACK.withAlpha(0.35),
+      distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0, NEAR_DIST) }
+  });
+}
+
+// NASA VTAD 公開の実ISS glTFモデル(約42MB、Public Domain)。
+// show=false のまま追加すると、Cesium内部が「非表示のプリミティブ」として
+// 更新処理自体をスキップするらしく、何フレーム待っても boundingSphere が
+// 取得できないことが実機で確認された。そのため show=true は維持しつつ、
+// modelMatrixは単位行列(初期値のまま、地球中心=ほぼ見えない位置)にしておく。
+// これで boundingSphere.center が「モデル自身のローカル座標系での重心」を
+// 正しく返すようになる(以前、issShownへ仮配置した状態で測っていたせいで
+// ワールド座標をローカル座標と誤認し、補正後に数百万m単位で吹っ飛ぶ不具合があった)。
+const ISS_MODEL_URL = 'https://assets.science.nasa.gov/content/dam/science/psd/solar/2023/09/i/ISS_stationary.glb';
+let issModel = null, issModelState = 'idle', issModelLocalCenter = null; // idle|loading|ready|failed
+
+async function ensureIssModel(){
+  if (issModelState === 'loading' || issModelState === 'ready') return;
+  issModelState = 'loading';
+  try{
+    const m = await Cesium.Model.fromGltfAsync({ url: ISS_MODEL_URL, minimumPixelSize: 24 });
+    // modelMatrixは触らない(単位行列のまま)。地球中心付近に一瞬置かれる形になるが、
+    // 補正値が取れるまでの間だけなので実質見えない。
+    // ここでは issModel にまだ代入しない。代入するとtickハンドラ側の
+    // 「補正値が無い間は粗い位置(issShownに仮配置)で表示する」フォールバックが
+    // 毎フレーム動いてしまい、単位行列のまま測るはずのboundingSphereを
+    // 実際には仮配置後の状態で読んでしまう(=ワールド座標をローカル座標と
+    // 誤認する)という不具合が実機ログで確認された。測定が終わるまでは
+    // tickハンドラから完全に見えない状態にしておく。
+    scene.primitives.add(m);
+    m.show = true; // false のままだと内部更新処理自体がスキップされ boundingSphere が永久に取れなかった
+
+    let tries = 0;
+    const tryRead = ()=>{
+      tries++;
+      try{
+        const hasSphere = !!m.boundingSphere;
+        const c = hasSphere ? m.boundingSphere.center : null;
+        const r = hasSphere ? m.boundingSphere.radius : null;
+        console.info('[orbit] ISSモデル診断 (try '+tries+'):', {
+          boundingSphereExists: hasSphere,
+          center: c ? { x:c.x, y:c.y, z:c.z, magnitude: Cesium.Cartesian3.magnitude(c) } : null,
+          radius: r
+        });
+        issModelLocalCenter = c ? Cesium.Cartesian3.clone(c, new Cesium.Cartesian3()) : Cesium.Cartesian3.ZERO;
+        issModel = m; // 測定が終わってから初めてtickハンドラに渡す
+        issModelState = 'ready';
+      }catch(e2){
+        if (tries < 60){ // 約1秒ぶんリトライ(60fps想定)
+          removeListener2 = scene.postRender.addEventListener(onPostRender);
+        } else {
+          issModelState = 'failed';
+          console.warn('[orbit] ISS実モデル: '+tries+'回試しても boundingSphere 取得失敗。補正無しの粗い位置のまま表示します。', e2);
+        }
+      }
+    };
+    function onPostRender(){ removeListener2(); tryRead(); }
+    let removeListener2 = scene.postRender.addEventListener(onPostRender);
+  }catch(e){
+    issModelState = 'failed';
+    console.warn('[orbit] ISS実モデルの読み込みに失敗（CORS制限などの可能性）。ボックス概形のみで継続します。', e);
+  }
+}
+
+function selectObject(kind, opts){
+  clearSelection();
+  selection.kind = kind;
+  let positionProp, flyRange, entities = [];
+  if (catalogue.points) catalogue.points.show = false; // 接写中は見えないので描画負荷を落とす
+
+  if (kind === 'iss'){
+    positionProp = issEntity.position;
+    entities.push(addShapeBox(positionProp, issOrientation, new Cesium.Cartesian3(109,6,6), '#D8D8D8', 1.0));   // トラス
+    entities.push(addShapeBox(positionProp, issOrientation, new Cesium.Cartesian3(1.5,73,4), '#1E3A6E', 0.92)); // 太陽電池パネル
+    issEntity.point.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(NEAR_DIST, Number.MAX_VALUE);
+    flyRange = 350;
+    ensureIssModel(); // fire-and-forget、完了次第tickハンドラがボックスに重ねて表示する
+  } else if (kind === 'bulkSat'){
+    const idx = opts.index;
+    const satrec = catalogue.satrecs[idx];
+    positionProp = makeSatPositionProperty(satrec);
+    const orientation = new Cesium.VelocityOrientationProperty(positionProp);
+    entities.push(addShapeBox(positionProp, orientation, new Cesium.Cartesian3(2,2,3), '#B8C4D0', 1.0));     // 本体
+    entities.push(addShapeBox(positionProp, orientation, new Cesium.Cartesian3(0.3,18,3), '#2A4E8C', 0.9));  // パネル
+    const pt = catalogue.points.get(idx);
+    pt.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(NEAR_DIST, Number.MAX_VALUE);
+    selection.pointRef = pt;
+    flyRange = 600;
+  } else return;
+
+  selection.entities = entities;
+
+  idle = false; fadeHint();
+
+  // 追加直後のエンティティはCesium内部でまだバウンディングスフィアが計算されておらず
+  // (次のレンダーフレームまでPENDING状態)、見た目(point/box等)も無いため
+  // viewer.flyTo(entity) は失敗する。position を同期的にサンプリングして
+  // camera.flyToBoundingSphere に直接渡すことでこれを回避する。
+  //
+  // さらに重要な点として、"今の位置"ではなく"到着予定時刻の予測位置"に飛ぶ。
+  // ISSは秒速7.66km、衛星群も高速で動くため、静止した1点をめがけて2.4秒かけて
+  // 飛ぶと、到着した頃には対象は数km〜十数km先へ進んでしまい追いつけなくなる。
+  //
+  // 追従は自前のfollowTarget方式(scene.postUpdateで差分移動)を使う。
+  // Cesium標準のtrackedEntityはフライイン中や手動ドラッグ操作と競合するため不採用。
+  const startTracking = ()=>{ if (selection.kind === kind){ followTarget = positionProp; followLastPos = null; } };
+
+  const FLY_DURATION = 2.4;
+  const startPos = kind === 'iss'
+    ? (issPositionAt(Date.now() + FLY_DURATION*1000) || issShown)
+    : positionProp.getValue(Cesium.JulianDate.addSeconds(viewer.clock.currentTime, FLY_DURATION, new Cesium.JulianDate()));
+  if (startPos){
+    camera.flyToBoundingSphere(new Cesium.BoundingSphere(startPos, 50), {
+      duration: FLY_DURATION,
+      offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(30), Cesium.Math.toRadians(-20), flyRange),
+      complete: startTracking,
+      cancel: startTracking
+    });
+  } else {
+    startTracking(); // 位置が即座に取れない場合はフライインを諦めて追跡だけ開始
+  }
+
+  if (kind === 'iss'){ btnIss.textContent = '追尾を解除'; btnIss.classList.add('home'); }
+}
+
+/* ---- クリック：エンティティ or 地点プローブ ---- */
+const card = document.getElementById('card'), cardBody = document.getElementById('card-body');
+document.querySelector('#card .x').onclick = ()=> { card.style.display='none'; clearSelection(); };
+function showCard(x,y,html){
+  cardBody.innerHTML = html;
+  card.style.display='block';
+  const w = card.offsetWidth, h = card.offsetHeight;
+  card.style.left = Math.min(Math.max(x-w/2,8), innerWidth-w-8) + 'px';
+  card.style.top  = Math.max(y-h-14, 8) + 'px';
+}
+
+const WMO={0:'快晴',1:'晴れ',2:'一部曇',3:'曇り',45:'霧',48:'霧氷',51:'霧雨',53:'霧雨',55:'霧雨(強)',
+  61:'雨(弱)',63:'雨',65:'雨(強)',71:'雪(弱)',73:'雪',75:'雪(強)',80:'にわか雨',81:'にわか雨',
+  82:'にわか雨(強)',85:'にわか雪',86:'にわか雪(強)',95:'雷雨',96:'雷雨(雹)',99:'雷雨(強雹)'};
+
+const handler = new Cesium.ScreenSpaceEventHandler(scene.canvas);
+handler.setInputAction(async (click)=>{
+  const picked = scene.pick(click.position);
+
+  // カタログ衛星（PointPrimitiveCollection、Entityではないため id は素のオブジェクト）
+  if (Cesium.defined(picked) && picked.id && picked.id.kind === 'bulkSat'){
+    const idx = picked.id.index;
+    const name = catalogue.names[idx], cat = catalogue.cats[idx], satrec = catalogue.satrecs[idx];
+    const now = new Date();
+    const gmst = satellite.gstime(now);
+    let html;
+    try{
+      const pv = satellite.propagate(satrec, now);
+      const geo = satellite.eciToGeodetic(pv.position, gmst);
+      const vel = Math.hypot(pv.velocity.x, pv.velocity.y, pv.velocity.z); // km/s
+      const noradId = satrec.satnum;
+      html = `
+        <div class="ct">${name}</div>
+        <div class="cs">${CAT[cat].label} ・ NORAD ${noradId}</div>
+        <div class="kv"><span>直下点</span><b>${Cesium.Math.toDegrees(geo.latitude).toFixed(2)}, ${Cesium.Math.toDegrees(geo.longitude).toFixed(2)}</b></div>
+        <div class="kv"><span>高度</span><b>${geo.height.toFixed(0)} km</b></div>
+        <div class="kv"><span>速度</span><b>${vel.toFixed(2)} km/s</b></div>
+        <div class="kv"><span>軌道傾斜</span><b>${(satrec.inclo*180/Math.PI).toFixed(1)}°</b></div>
+        <div class="cf">SGP4解析伝播 ・ CelesTrak TLE ${catalogue.meta?catalogue.meta.generated_at.slice(0,10):''}</div>`;
+    }catch(e){
+      html = `<div class="ct">${name}</div><div class="cs">${CAT[cat].label}</div>
+        <div class="cf">この時刻では伝播計算できません（軌道消失の可能性）</div>`;
+    }
+    showCard(click.position.x, click.position.y, html);
+    selectObject('bulkSat', { index: idx });
+    return;
+  }
+
+  if (Cesium.defined(picked) && picked.id && picked.id.properties){
+    const p = picked.id.properties;
+    const kind = p.kind.getValue();
+    if (kind === 'iss'){
+      const d = issMeta;
+      showCard(click.position.x, click.position.y, d ? `
+        <div class="ct">ISS</div>
+        <div class="cs">国際宇宙ステーション ・ NORAD 25544</div>
+        <div class="kv"><span>緯度経度</span><b>${d.latitude.toFixed(2)}, ${d.longitude.toFixed(2)}</b></div>
+        <div class="kv"><span>高度</span><b>${d.altitude.toFixed(1)} km</b></div>
+        <div class="kv"><span>速度</span><b>${Math.round(d.velocity).toLocaleString()} km/h</b></div>
+        <div class="kv"><span>可視半径</span><b>${Math.round(d.footprint/2).toLocaleString()} km</b></div>
+        <div class="kv"><span>日照</span><b>${d.visibility==='daylight'?'昼':'夜'}</b></div>
+        <div class="cf">実測位置 ・ wheretheiss.at</div>` : '<div class="ct">取得中…</div>');
+      if (issShown) selectObject('iss', {});
+      return;
+    }
+    clearSelection();
+    if (kind === 'quake'){
+      const dep = p.depth.getValue();
+      showCard(click.position.x, click.position.y, `
+        <div class="ct">M ${p.mag.getValue()}</div>
+        <div class="cs">${p.place.getValue()||''}</div>
+        <div class="kv"><span>深さ</span><b>${dep!=null?dep.toFixed(0)+' km':'–'}</b></div>
+        <div class="kv"><span>発生</span><b>${new Date(p.time.getValue()).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo',hour12:false})}</b></div>
+        <div class="cf">USGS Earthquake Hazards Program（Public Domain）</div>`);
+    } else {
+      const w=p.wind.getValue(), r=p.rain.getValue(), hu=p.hum.getValue();
+      showCard(click.position.x, click.position.y, `
+        <div class="ct">${p.name.getValue()}</div>
+        <div class="cs">気象庁 アメダス観測所</div>
+        <div class="kv"><span>気温</span><b>${p.temp.getValue()} ℃</b></div>
+        ${w!=null?`<div class="kv"><span>風速</span><b>${w} m/s</b></div>`:''}
+        ${r!=null?`<div class="kv"><span>降水 1h</span><b>${r} mm</b></div>`:''}
+        ${hu!=null?`<div class="kv"><span>湿度</span><b>${hu} %</b></div>`:''}
+        <div class="cf">気象庁（政府標準利用規約）</div>`);
+    }
+    return;
+  }
+  // 地表を突いた → Open-Meteo プローブ（0.01°丸めでキャッシュ、標高は永続・localStorageミラー）
+  clearSelection();
+  const carte = camera.pickEllipsoid(click.position, scene.globe.ellipsoid);
+  if(!carte){ card.style.display='none'; return; }
+  const cg = Cesium.Cartographic.fromCartesian(carte);
+  const lat = Cesium.Math.toDegrees(cg.latitude), lon = Cesium.Math.toDegrees(cg.longitude);
+  const key = probeKey(lat, lon);
+  let hit = cache.probe.get(key);
+  if (!hit) { const ls = lsGet('probe:'+key); if (ls) { hit = ls; cache.probe.set(key, ls); } }
+  if (hit && Date.now() - hit.at < TTL.probe) {
+    showCard(click.position.x, click.position.y, hit.html + '<div class="cf" style="opacity:.6">キャッシュ表示（直近10分以内に観測済み）</div>');
+    return;
+  }
+  showCard(click.position.x, click.position.y, `<div class="ct">観測中…</div>
+    <div class="cs mono">${lat.toFixed(3)}, ${lon.toFixed(3)}</div>`);
+  try{
+    let elevCached = cache.elev.get(key);
+    if (elevCached === undefined) elevCached = lsGet('elev:'+key) ?? undefined;
+    const [fc, el] = await Promise.all([
+      fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&timezone=auto`).then(r=>r.json()),
+      elevCached !== undefined ? Promise.resolve({elevation:[elevCached]}) :
+        fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}`).then(r=>r.json()).catch(()=>({}))
+    ]);
+    if (el.elevation) { cache.elev.set(key, el.elevation[0]); lsSet('elev:'+key, el.elevation[0]); } // 標高は不変なのでTTLなし永続
+    const c = fc.current||{};
+    const html = `
+      <div class="ct">地点プローブ</div>
+      <div class="cs mono">${lat.toFixed(3)}, ${lon.toFixed(3)}</div>
+      <div class="kv"><span>天気</span><b>${WMO[c.weather_code]??'–'}</b></div>
+      <div class="kv"><span>気温</span><b>${c.temperature_2m??'–'} ℃</b></div>
+      <div class="kv"><span>風速</span><b>${c.wind_speed_10m??'–'} km/h</b></div>
+      <div class="kv"><span>湿度</span><b>${c.relative_humidity_2m??'–'} %</b></div>
+      <div class="kv"><span>標高</span><b>${el.elevation?el.elevation[0]+' m':'–'}</b></div>
+      <div class="cf"><a href="https://open-meteo.com/" target="_blank">Weather data by Open-Meteo.com</a>（CC BY 4.0）</div>`;
+    const entry = { at: Date.now(), html };
+    cache.probe.set(key, entry); lsSet('probe:'+key, entry);
+    showCard(click.position.x, click.position.y, html);
+  }catch(e){
+    showCard(click.position.x, click.position.y,
+      `<div class="ct">取得失敗</div><div class="cs">ネットワーク制限の可能性があります</div>`);
+  }
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+/* ---- レイヤ切替 ---- */
+document.getElementById('layers-head').onclick = ()=>{
+  document.getElementById('layers').classList.toggle('collapsed');
+};
+
+document.querySelectorAll('.lyr').forEach(el=>{
+  el.onclick = ()=>{
+    const k = el.dataset.k;
+    const on = !el.classList.contains('on');
+    el.classList.toggle('on', on); el.classList.toggle('off', !on);
+    if(k==='iss')   issDS.show   = on;
+    if(k==='track') trackDS.show = on;
+    if(CAT[k] && catalogue.points && catalogue.catIndex[k]){
+      catalogue.catIndex[k].forEach(idx=>{ catalogue.points.get(idx).show = on; });
+    }
+    if(k==='quake')  quakeDS.show  = on;
+    if(k==='amedas') amedasDS.show = on;
+    if(k==='night')  globe.enableLighting = on;
+  };
+});
+
+/* ---- ジャンプ ---- */
+document.querySelector('.jbtn.home').onclick = ()=>{
+  card.style.display='none'; idle = true;
+  camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(137.5, 25.0, 24000000),
+    orientation:{heading:0,pitch:Cesium.Math.toRadians(-90),roll:0}, duration:2.6 });
+};
+const btnIss = document.getElementById('btn-iss');
+btnIss.onclick = ()=>{
+  if(followTarget){
+    clearSelection();
+    return;
+  }
+  if(!issShown){ btnIss.textContent = '位置取得中…'; return; }
+  card.style.display='none';
+  selectObject('iss', {});
+};
+
+document.querySelectorAll('.jbtn[data-lon]').forEach(b=>{
+  b.onclick = ()=>{
+    card.style.display='none'; idle=false;
+    camera.flyTo({
+      destination:Cesium.Cartesian3.fromDegrees(+b.dataset.lon, +b.dataset.lat - 0.35, +b.dataset.h),
+      orientation:{heading:0, pitch:Cesium.Math.toRadians(-52), roll:0}, duration:3.0 });
+  };
+});
+
+const btnHere = document.getElementById('btn-here');
+btnHere.onclick = ()=>{
+  if (!navigator.geolocation){
+    btnHere.textContent = '非対応';
+    setTimeout(()=>btnHere.textContent='📍 現在地', 2000);
+    return;
+  }
+  btnHere.textContent = '取得中…';
+  navigator.geolocation.getCurrentPosition(
+    (pos)=>{
+      btnHere.textContent = '📍 現在地';
+      card.style.display='none'; clearSelection(); idle=false;
+      camera.flyTo({
+        destination:Cesium.Cartesian3.fromDegrees(
+          pos.coords.longitude, pos.coords.latitude - 0.35, 90000),
+        orientation:{heading:0, pitch:Cesium.Math.toRadians(-52), roll:0}, duration:3.0 });
+    },
+    (err)=>{
+      console.warn('[orbit] 位置情報の取得に失敗', err);
+      btnHere.textContent = err.code===1 ? '許可が必要' : '取得失敗';
+      setTimeout(()=>btnHere.textContent='📍 現在地', 2500);
+    },
+    { enableHighAccuracy:false, timeout:10000, maximumAge:300000 }
+  );
+};
+
+/* ---- 観測ループ ----
+   起動直後はlocalStorageに前回結果があれば即座に復元描画（ネットワーク待ちなし）。
+   その後は30秒ごとのハートビートで、実際にfetchするかは loadQuakes/loadAmedas
+   内部が backoff 間隔を見て自己判断する。タブ非表示時は tabVisible=false で即return。 */
+/* ============================================================
+   地上モード：カメラ高度が低いときは軌道上レイヤをまとめて隠す
+   個別のレイヤON/OFF状態(catalogue.points内の各点、issDS等)は
+   一切変更せず、DataSource/Collection単位のshowだけを一時的に
+   落とすので、地上を離れればユーザーが選んでいた表示状態に戻る。
+   ============================================================ */
+const GROUND_ALT = 150000; // これより低い高度(m)は「地上」とみなす
+let groundMode = false;
+function updateGroundMode(){
+  const h = camera.positionCartographic.height;
+  const shouldGround = h < GROUND_ALT;
+  if (shouldGround === groundMode) return;
+  groundMode = shouldGround;
+  const show = !groundMode;
+  if (catalogue.points) catalogue.points.show = show;
+  issDS.show = show;
+  trackDS.show = show;
+  shapeDS.show = show;
+}
+scene.postRender.addEventListener(updateGroundMode);
+
+restoreQuakesFromCache();
+restoreAmedasFromCache();
+function observeAll(){ loadQuakes(); loadAmedas(); }
+observeAll();
+setInterval(observeAll, 30*1000);
+</script>
+</body>
+</html>
