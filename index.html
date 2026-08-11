@@ -217,46 +217,17 @@
 // Ion トークン不要の構成にする（オフライン地形＋PDのNatural Earth基図）
 Cesium.Ion.defaultAccessToken = undefined;
 
-// GIBS(EPSG:4326)の実際のタイルグリッドは -180°〜396°/90°〜-198°(576°×288°)という
-// パディング付きの独自グリッド(NASA公式GDAL_WMS設定例で確認済み)。この矩形をそのまま
-// Cesiumのタイリングスキームとして使うと、正しいタイルは取得できる(実際に400エラーは
-// 解消し、直近のログでも欠損0件を確認済み)一方で、Cesium内部の幾何/UV計算がこの
-// 非標準サイズ(144°/72°幅など)のタイルを想定しておらず、球面への貼り付けに
-// 放射状の欠けが生じることが実機で複数回確認された。
-//
-// そのため「Cesiumに見せる幾何(標準スキーム)」と「実際に取得するURL(GIBSの実グリッド)」を
-// 分離する。標準スキームの各タイルの中心点をGIBSの実グリッド上のタイル番号に変換し、
-// UrlTemplateImageryProvider の customTags でURL構築時にだけそのタイルを使う。
-// GIBSの実タイルは標準タイルより大きいため、複数の標準タイルが同じGIBSタイルを指す
-// ことになるが、これはブラウザキャッシュにより無駄なく解決される(同一URLの再利用)。
-const gibsTilingScheme = new Cesium.GeographicTilingScheme({
-  rectangle: Cesium.Rectangle.fromDegrees(-180, -198, 396, 90),
-  numberOfLevelZeroTilesX: 2,
-  numberOfLevelZeroTilesY: 1
+// GIBS(EPSG:4326)は非標準のタイルグリッドを使う(WMTS GetCapabilities で確認済み):
+//   Level 0: 2x1,  Level 1: 3x2,  Level 2: 5x3,
+//   Level 3: 10x5, Level 4: 20x10, Level 5: 40x20, ...
+// Level 3以降はpower-of-2倍(10→20→40→80→160)で増えるため、
+// Cesiumの GeographicTilingScheme(numberOfLevelZeroTilesX:10, Y:5) を使えば
+// Cesium Level 0 = GIBS Level 3 として完全に一致する。
+// Level 0-2の低解像度域は下地の Natural Earth II が担うため問題ない。
+const gibsScheme = new Cesium.GeographicTilingScheme({
+  numberOfLevelZeroTilesX: 10,
+  numberOfLevelZeroTilesY: 5
 });
-const standardScheme = new Cesium.GeographicTilingScheme(); // Cesium内部の幾何/LOD計算はこちらに委ねる
-
-function gibsRowColTags(){
-  // customTagsは (imageryProvider, x, y, level) を受け取り、標準スキームでのタイル中心点を
-  // GIBSの実グリッド上のタイル番号へ変換する。事前にNode.jsで座標変換ロジックを検算済み。
-  const rectScratch = new Cesium.Rectangle();
-  const centerScratch = new Cesium.Cartographic();
-  const xyScratch = new Cesium.Cartesian2();
-  return {
-    gRow: function(imageryProvider, x, y, level){
-      standardScheme.tileXYToRectangle(x, y, level, rectScratch);
-      Cesium.Rectangle.center(rectScratch, centerScratch);
-      gibsTilingScheme.positionToTileXY(centerScratch, level, xyScratch);
-      return xyScratch.y;
-    },
-    gCol: function(imageryProvider, x, y, level){
-      standardScheme.tileXYToRectangle(x, y, level, rectScratch);
-      Cesium.Rectangle.center(rectScratch, centerScratch);
-      gibsTilingScheme.positionToTileXY(centerScratch, level, xyScratch);
-      return xyScratch.x;
-    }
-  };
-}
 
 const viewer = new Cesium.Viewer('globe', {
   // 最下層はCesium同梱Natural Earth II(標準スキームのみ使用、絶対に欠けない)。
@@ -271,24 +242,26 @@ const viewer = new Cesium.Viewer('globe', {
 
 const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
 
-// Blue Marble(中間層)。標準スキームでCesiumに幾何を計算させ、URLだけGIBS実タイルに変換する。
+// Blue Marble(中間層)。gibsScheme(10x5起点)でCesiumの幾何/UV計算をGIBSの実グリッドに一致させる。
+// URL中の {z} はCesiumレベルなので、customTags {gz} で +3 してGIBSレベルに変換する。
+// 500m TileMatrixSet: GIBS Level 3-7 = Cesium Level 0-4
 (function addBlueMarbleLayer(){
   try{
-    const tags = gibsRowColTags();
     const bm = new Cesium.UrlTemplateImageryProvider({
-      url: 'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/BlueMarble_NextGeneration/default/500m/{z}/{gRow}/{gCol}.jpg',
-      tilingScheme: standardScheme,
-      maximumLevel: 8,
-      customTags: tags,
+      url: 'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/BlueMarble_NextGeneration/default/500m/{gz}/{y}/{x}.jpg',
+      tilingScheme: gibsScheme,
+      maximumLevel: 4,
+      customTags: { gz: function(p, x, y, level){ return level + 3; } },
       credit: new Cesium.Credit('NASA EOSDIS GIBS / Blue Marble Next Generation')
     });
     let bmMissCount = 0;
     bm.errorEvent.addEventListener(()=>{
       bmMissCount++;
-      console.info(`[orbit] Blue Marble: タイル欠損検出(${bmMissCount}件目)`);
+      if (bmMissCount === 1 || bmMissCount % 50 === 0)
+        console.info(`[orbit] Blue Marble: タイル欠損検出(${bmMissCount}件目)`);
     });
     viewer.imageryLayers.addImageryProvider(bm);
-    console.info('[orbit] Blue Marbleレイヤ(中間層・標準スキーム+URL変換方式)をNatural Earth II上に追加');
+    console.info('[orbit] Blue Marbleレイヤ(中間層・GIBSグリッド直接対応)をNatural Earth II上に追加');
   }catch(e){
     console.warn('[orbit] Blue Marbleレイヤ追加失敗。Natural Earth IIのみで継続します。', e);
   }
@@ -298,31 +271,30 @@ const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
    最下層: Cesium同梱 Natural Earth II(標準スキーム、絶対に欠けない)
    中間層: NASA Blue Marble Next Generation（雲なし・静的な合成写真）
    上層  : NASA GIBS MODIS Terra 真色画像（実際の雲入り、ほぼ毎日更新）
-   いずれもCesiumに見せる幾何は標準スキーム固定、URL組み立てだけGIBS実グリッドへ変換する
-   方式(上のgibsRowColTags参照)。これにより「正しいタイルを取得しつつ、Cesium内部の
-   UVマッピングは常に標準サイズのタイルとして扱わせる」ことで、両方の問題を同時に回避する。
+
+   GIBSのEPSG:4326タイルグリッドは非標準(Level 0: 2x1, 1: 3x2, 2: 5x3, 3: 10x5, ...)。
+   Level 3以降はpower-of-2倍なので、gibsScheme(10x5起点)でCesium Level 0 = GIBS Level 3
+   として完全に一致させる。Level 0-2の低解像度はNatural Earth IIが担う。
 
    NASA公式ブログ曰く「衛星は東から西へ軌道を回りながら撮影するため、
    当日UTC分のタイルの多くはまだ空」とのことで、UTC前日を指定しても
    東経側(日本を含む)がまだ欠けていることがある(400 Bad Requestで判明)。
    そのため2日前まで安全マージンを取り、かつ欠損自体は仕様通りの挙動なので
    Cesiumの既定のコンソールエラー出力は黙らせて自前で1行だけ状況を出す。 */
+// 250m TileMatrixSet: GIBS Level 3-8 = Cesium Level 0-5
 (function addGibsTrueColorLayer(){
   try{
-    const d = new Date(Date.now() - 2*86400000); // UTC2日前（東経側の欠損に対する安全マージン）
+    const d = new Date(Date.now() - 2*86400000);
     const dateStr = d.toISOString().slice(0,10);
-    const tags = gibsRowColTags();
     const gibs = new Cesium.UrlTemplateImageryProvider({
-      url: `https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${dateStr}/250m/{z}/{gRow}/{gCol}.jpg`,
-      tilingScheme: standardScheme,
-      maximumLevel: 8,
-      customTags: tags,
+      url: `https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${dateStr}/250m/{gz}/{y}/{x}.jpg`,
+      tilingScheme: gibsScheme,
+      maximumLevel: 5,
+      customTags: { gz: function(p, x, y, level){ return level + 3; } },
       credit: new Cesium.Credit('NASA EOSDIS GIBS / MODIS Terra Corrected Reflectance (' + dateStr + ')')
     });
     let gibsMissCount = 0;
     gibs.errorEvent.addEventListener(()=>{
-      // 特定タイルの欠損はGIBSの仕様上ありえる想定内の状態(下地のBlue Marbleが透けて見える)。
-      // ここでlistenerを持たせること自体がCesium既定の大量console.error出力を抑止する。
       gibsMissCount++;
       if (gibsMissCount === 1 || gibsMissCount % 50 === 0){
         console.info(`[orbit] GIBS実写: 一部タイル欠損(${gibsMissCount}件, 下地で代替表示中)`);
