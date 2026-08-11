@@ -220,6 +220,8 @@ Cesium.Ion.defaultAccessToken = undefined;
 // GIBSのWMTSタイルグリッドはCesiumの球体テッセレーション(power-of-2境界)と
 // 根本的に噛み合わない(GIBSは36°単位の非標準グリッド)ため、WMSを使う。
 // WMSはBBOX指定なのでCesiumの標準スキームがそのまま動き、境界問題が起きない。
+// 日次衛星画像はVIIRS SNPP(広角3000kmスワス)を採用。MODIS(2330km)より
+// 軌道間ギャップが小さく、残る隙間もcolorToAlpha(黒→透過)で下層に透過させる。
 
 const viewer = new Cesium.Viewer('globe', {
   // 最下層はCesium同梱Natural Earth II(標準スキームのみ使用、絶対に欠けない)。
@@ -253,17 +255,18 @@ const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
 /* ---- 地球テクスチャ：3層構成 ----
    最下層: Cesium同梱 Natural Earth II(絶対に欠けない)
    中間層: NASA Blue Marble Next Generation（WMS）
-   上層  : NASA GIBS MODIS Terra 真色画像（WMS・ほぼ毎日更新）
-   WMS はBBOX指定なのでCesiumの標準スキームと完全に整合し、タイル境界のウェッジが生じない。 */
+   上層  : NASA GIBS VIIRS SNPP 真色画像（WMS・ほぼ毎日更新）
+   VIIRSはMODISより広角スワス(3000km)で軌道間ギャップが小さい。
+   残る隙間はcolorToAlphaで黒→透過にし、下層Blue Marbleで補完する。 */
 (function addGibsTrueColorLayer(){
   try{
     const d = new Date(Date.now() - 2*86400000);
     const dateStr = d.toISOString().slice(0,10);
     const gibs = new Cesium.WebMapServiceImageryProvider({
       url: 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
-      layers: 'MODIS_Terra_CorrectedReflectance_TrueColor',
-      parameters: { transparent: false, format: 'image/jpeg', TIME: dateStr },
-      credit: new Cesium.Credit('NASA EOSDIS GIBS / MODIS Terra Corrected Reflectance (' + dateStr + ')')
+      layers: 'VIIRS_SNPP_CorrectedReflectance_TrueColor',
+      parameters: { transparent: true, format: 'image/png', TIME: dateStr },
+      credit: new Cesium.Credit('NASA EOSDIS GIBS / VIIRS SNPP Corrected Reflectance (' + dateStr + ')')
     });
     let gibsMissCount = 0;
     gibs.errorEvent.addEventListener(()=>{
@@ -272,8 +275,10 @@ const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
         console.info(`[orbit] GIBS実写: 一部タイル欠損(${gibsMissCount}件, 下地で代替表示中)`);
       }
     });
-    viewer.imageryLayers.addImageryProvider(gibs);
-    console.info('[orbit] GIBS実写(雲入り)レイヤをBlue Marble上に追加:', dateStr);
+    const gibsLayer = viewer.imageryLayers.addImageryProvider(gibs);
+    gibsLayer.colorToAlpha = Cesium.Color.BLACK;
+    gibsLayer.colorToAlphaThreshold = 0.1;
+    console.info('[orbit] GIBS実写(VIIRS)レイヤをBlue Marble上に追加:', dateStr);
   }catch(e){
     console.warn('[orbit] GIBS実写レイヤ追加失敗。Blue Marbleのみで継続します。', e);
   }
