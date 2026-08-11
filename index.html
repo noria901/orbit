@@ -187,7 +187,7 @@
   <div class="hd mono">SOURCES / LICENCE</div>
   <b>衛星カタログ</b> <a href="https://celestrak.org/" target="_blank">CelesTrak</a> GP/TLE（GROUP=active）・GitHub Actionsが3時間毎に取得、SGP4で自前伝播<br>
   <b>ISS</b> wheretheiss.at 実測位置（要認証なし）<br>
-  <b>地球テクスチャ</b> <a href="https://gibs.earthdata.nasa.gov/" target="_blank">NASA GIBS</a> Blue Marble(下地・静的)+ MODIS Terra実写(上層・ほぼ毎日更新)<br>
+  <b>地球テクスチャ</b> Natural Earth II(最下層・PD・常に欠けない)+ <a href="https://gibs.earthdata.nasa.gov/" target="_blank">NASA GIBS</a> Blue Marble(中間層)+ MODIS Terra実写(上層・ほぼ毎日更新)<br>
   <b>地震</b> USGS Earthquake Hazards（Public Domain）<br>
   <b>気象</b> 気象庁 アメダス（政府標準利用規約）<br>
   <b>地点</b> <a href="https://open-meteo.com/" target="_blank">Weather data by Open-Meteo.com</a>（CC BY 4.0）<br>
@@ -233,17 +233,17 @@ const gibsTilingScheme = new Cesium.GeographicTilingScheme({
 });
 
 const viewer = new Cesium.Viewer('globe', {
-  imageryProvider: new Cesium.WebMapTileServiceImageryProvider({
-    // REST方式。BlueMarbleは静的レイヤなので{Time}セグメントは無く、defaultの直後にTileMatrixSetが来る
-    // (KVP方式だとTileMatrixラベルの解釈がサーバー実装依存でずれることがあり、実際に空白/ブロック状になる不具合が出た)
-    url: 'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/BlueMarble_NextGeneration/default/500m/{TileMatrix}/{TileRow}/{TileCol}.jpg',
-    layer: 'BlueMarble_NextGeneration',
-    style: 'default',
-    format: 'image/jpeg',
-    tileMatrixSetID: '500m',
-    tilingScheme: gibsTilingScheme,
-    maximumLevel: 7, // NASA公式(nasa-gibs/gibs-ml)のレベル対応表で500mセットの実在最大は level 7
-    credit: new Cesium.Credit('NASA EOSDIS GIBS / Blue Marble Next Generation')
+  // 最下層は標準タイリングスキームのCesium同梱Natural Earth II。
+  // カスタムタイリングスキーム(gibsTilingScheme)を使わないので絶対に欠けない。
+  // これまでBlue Marbleを直接ベースレイヤーにしていたが、Blue Marble自身が
+  // gibsTilingSchemeの一部タイルで欠損している可能性を検証していなかった
+  // (GIBS実写レイヤにはerrorEventでの欠損カウントを仕込んでいたのに、
+  // Blue Marbleには一切仕込んでいなかった)。ベースレイヤーが欠けると、
+  // その下には何も無く globe.baseColor(暗い紺色)がそのまま見えるため、
+  // これが放射状の暗い欠けの正体である可能性が高い。絶対に欠けない
+  // レイヤーを最下層に敷き、Blue Marbleは中間層に格下げして欠損計測する。
+  imageryProvider: new Cesium.TileMapServiceImageryProvider({
+    url: Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII')
   }),
   baseLayerPicker:false, geocoder:false, homeButton:false, sceneModePicker:false,
   navigationHelpButton:false, animation:false, timeline:false, fullscreenButton:false,
@@ -252,6 +252,34 @@ const viewer = new Cesium.Viewer('globe', {
 });
 
 const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
+
+// Blue Marbleは中間層として追加。GIBS実写レイヤと同様にerrorEventで欠損を計測する
+// (これまで未計測だった箇所。もしBlue Marble自身も欠けていた場合、次回のログで判明する)。
+(function addBlueMarbleLayer(){
+  try{
+    const bm = new Cesium.WebMapTileServiceImageryProvider({
+      // REST方式。BlueMarbleは静的レイヤなので{Time}セグメントは無く、defaultの直後にTileMatrixSetが来る
+      // (KVP方式だとTileMatrixラベルの解釈がサーバー実装依存でずれることがあり、実際に空白/ブロック状になる不具合が出た)
+      url: 'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/BlueMarble_NextGeneration/default/500m/{TileMatrix}/{TileRow}/{TileCol}.jpg',
+      layer: 'BlueMarble_NextGeneration',
+      style: 'default',
+      format: 'image/jpeg',
+      tileMatrixSetID: '500m',
+      tilingScheme: gibsTilingScheme,
+      maximumLevel: 7, // NASA公式(nasa-gibs/gibs-ml)のレベル対応表で500mセットの実在最大は level 7
+      credit: new Cesium.Credit('NASA EOSDIS GIBS / Blue Marble Next Generation')
+    });
+    let bmMissCount = 0;
+    bm.errorEvent.addEventListener(()=>{
+      bmMissCount++;
+      console.info(`[orbit] Blue Marble: タイル欠損検出(${bmMissCount}件目)。これまで未計測だった箇所。`);
+    });
+    viewer.imageryLayers.addImageryProvider(bm);
+    console.info('[orbit] Blue Marbleレイヤ(中間層)をNatural Earth II上に追加');
+  }catch(e){
+    console.warn('[orbit] Blue Marbleレイヤ追加失敗。Natural Earth IIのみで継続します。', e);
+  }
+})();
 
 /* ---- 地球テクスチャ：2層構成 ----
    下地: NASA Blue Marble Next Generation（雲なし・常設・静的な合成写真。REST方式・時刻指定不要）
