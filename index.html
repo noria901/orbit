@@ -359,6 +359,7 @@ viewer.scene.globe.tileLoadProgressEvent.addEventListener(function once(n){
   if (n > 0) return;
   viewer.scene.globe.tileLoadProgressEvent.removeEventListener(once);
   const b = document.getElementById('boot');
+  if (!b) return;
   b.style.opacity = 0;
   setTimeout(()=>b.remove(), 1200);
   camera.flyTo({
