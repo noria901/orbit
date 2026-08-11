@@ -217,20 +217,9 @@
 // Ion トークン不要の構成にする（オフライン地形＋PDのNatural Earth基図）
 Cesium.Ion.defaultAccessToken = undefined;
 
-// GIBS(EPSG:4326)は非標準のタイルグリッドを使う(WMTS GetCapabilities で確認済み):
-//   Level 0: 2x1,  Level 1: 3x2,  Level 2: 5x3,
-//   Level 3: 10x5, Level 4: 20x10, Level 5: 40x20, ...
-// Level 3以降はpower-of-2倍(10→20→40→80→160)で増えるため、
-// Cesiumの GeographicTilingScheme(numberOfLevelZeroTilesX:10, Y:5) を使えば
-// Cesium Level 0 = GIBS Level 3 として完全に一致する。
-// Level 0-2の低解像度域は下地の Natural Earth II が担うため問題ない。
-const gibsScheme = new Cesium.GeographicTilingScheme({
-  numberOfLevelZeroTilesX: 10,
-  numberOfLevelZeroTilesY: 5
-});
-// Cesium Level 0-4 → GIBS TileMatrix "3"-"7" (500m), Level 0-5 → "3"-"8" (250m)
-const gibsMatrixLabels500m = ['3','4','5','6','7'];
-const gibsMatrixLabels250m = ['3','4','5','6','7','8'];
+// GIBSのWMTSタイルグリッドはCesiumの球体テッセレーション(power-of-2境界)と
+// 根本的に噛み合わない(GIBSは36°単位の非標準グリッド)ため、WMSを使う。
+// WMSはBBOX指定なのでCesiumの標準スキームがそのまま動き、境界問題が起きない。
 
 const viewer = new Cesium.Viewer('globe', {
   // 最下層はCesium同梱Natural Earth II(標準スキームのみ使用、絶対に欠けない)。
@@ -245,65 +234,35 @@ const viewer = new Cesium.Viewer('globe', {
 
 const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
 
-// Blue Marble(中間層)。WebMapTileServiceImageryProvider(WMTS専用)で
-// Cesiumにタイル座標の変換を一任する。
+// Blue Marble(中間層)。WMS経由でCesiumの標準スキームと完全に整合させる。
 (function addBlueMarbleLayer(){
   try{
-    const bm = new Cesium.WebMapTileServiceImageryProvider({
-      url: 'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/BlueMarble_NextGeneration/default/500m/{TileMatrix}/{TileRow}/{TileCol}.jpg',
-      layer: 'BlueMarble_NextGeneration',
-      style: 'default',
-      tileMatrixSetID: '500m',
-      format: 'image/jpeg',
-      tilingScheme: gibsScheme,
-      maximumLevel: 4,
-      tileMatrixLabels: gibsMatrixLabels500m,
-      tileWidth: 512,
-      tileHeight: 512,
+    const bm = new Cesium.WebMapServiceImageryProvider({
+      url: 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
+      layers: 'BlueMarble_NextGeneration',
+      parameters: { transparent: false, format: 'image/jpeg' },
       credit: new Cesium.Credit('NASA EOSDIS GIBS / Blue Marble Next Generation')
     });
-    let bmMissCount = 0;
-    bm.errorEvent.addEventListener(()=>{
-      bmMissCount++;
-      if (bmMissCount === 1 || bmMissCount % 50 === 0)
-        console.info(`[orbit] Blue Marble: タイル欠損検出(${bmMissCount}件目)`);
-    });
     viewer.imageryLayers.addImageryProvider(bm);
-    console.info('[orbit] Blue Marbleレイヤ(中間層・WMTS直接対応)をNatural Earth II上に追加');
+    console.info('[orbit] Blue Marbleレイヤ(中間層・WMS)をNatural Earth II上に追加');
   }catch(e){
     console.warn('[orbit] Blue Marbleレイヤ追加失敗。Natural Earth IIのみで継続します。', e);
   }
 })();
 
 /* ---- 地球テクスチャ：3層構成 ----
-   最下層: Cesium同梱 Natural Earth II(標準スキーム、絶対に欠けない)
-   中間層: NASA Blue Marble Next Generation（雲なし・静的な合成写真）
-   上層  : NASA GIBS MODIS Terra 真色画像（実際の雲入り、ほぼ毎日更新）
-
-   GIBSのEPSG:4326タイルグリッドは非標準(Level 0: 2x1, 1: 3x2, 2: 5x3, 3: 10x5, ...)。
-   Level 3以降はpower-of-2倍なので、gibsScheme(10x5起点)でCesium Level 0 = GIBS Level 3
-   として完全に一致させる。Level 0-2の低解像度はNatural Earth IIが担う。
-
-   NASA公式ブログ曰く「衛星は東から西へ軌道を回りながら撮影するため、
-   当日UTC分のタイルの多くはまだ空」とのことで、UTC前日を指定しても
-   東経側(日本を含む)がまだ欠けていることがある(400 Bad Requestで判明)。
-   そのため2日前まで安全マージンを取り、かつ欠損自体は仕様通りの挙動なので
-   Cesiumの既定のコンソールエラー出力は黙らせて自前で1行だけ状況を出す。 */
+   最下層: Cesium同梱 Natural Earth II(絶対に欠けない)
+   中間層: NASA Blue Marble Next Generation（WMS）
+   上層  : NASA GIBS MODIS Terra 真色画像（WMS・ほぼ毎日更新）
+   WMS はBBOX指定なのでCesiumの標準スキームと完全に整合し、タイル境界のウェッジが生じない。 */
 (function addGibsTrueColorLayer(){
   try{
     const d = new Date(Date.now() - 2*86400000);
     const dateStr = d.toISOString().slice(0,10);
-    const gibs = new Cesium.WebMapTileServiceImageryProvider({
-      url: `https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${dateStr}/250m/{TileMatrix}/{TileRow}/{TileCol}.jpg`,
-      layer: 'MODIS_Terra_CorrectedReflectance_TrueColor',
-      style: 'default',
-      tileMatrixSetID: '250m',
-      format: 'image/jpeg',
-      tilingScheme: gibsScheme,
-      maximumLevel: 5,
-      tileMatrixLabels: gibsMatrixLabels250m,
-      tileWidth: 512,
-      tileHeight: 512,
+    const gibs = new Cesium.WebMapServiceImageryProvider({
+      url: 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
+      layers: 'MODIS_Terra_CorrectedReflectance_TrueColor',
+      parameters: { transparent: false, format: 'image/jpeg', TIME: dateStr },
       credit: new Cesium.Credit('NASA EOSDIS GIBS / MODIS Terra Corrected Reflectance (' + dateStr + ')')
     });
     let gibsMissCount = 0;
