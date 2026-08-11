@@ -217,11 +217,20 @@
 // Ion トークン不要の構成にする（オフライン地形＋PDのNatural Earth基図）
 Cesium.Ion.defaultAccessToken = undefined;
 
-// 過去にGIBSの実際のタイルグリッド(576°×288°のパディング付き)に合わせた
-// カスタムタイリングスキームを試したが、地球儀本体のジオメトリ分割と噛み合わず
-// 球面のつなぎ目に放射状の欠けが生じる不具合が実機で確認された。
-// 東経側での一部タイル404/400(パディング境界起因)より見た目の構造的破綻の方が
-// 実害が大きいと判断し、標準のGeographicTilingSchemeに戻している。
+// 過去に一度「カスタムタイリングスキームが放射状の欠けの原因では」と判断して
+// 標準スキームに戻したが、これは未検証の憶測だった。実際にコンソールログを
+// 確認したところ、標準スキームに戻したことで level1のcol3、level2のcol5-7 が
+// 400エラーで欠落する問題(GIBSの実グリッドが576°×288°のパディング付きで
+// 素直な360°×180°ではないため180°Eより東で列番号がズレる件、NASA公式
+// GDAL_WMS設定例で確認済み)がそのまま復活していたことが確定した。
+// これらは level1/2 という低いズームレベル=1タイルが地球全体を大きく占める
+// 角度のタイルのため、欠落すると画面上で放射状の大きな欠けとして見える
+// (実際の症状と一致)。カスタムタイリングスキームを復元する。
+const gibsTilingScheme = new Cesium.GeographicTilingScheme({
+  rectangle: Cesium.Rectangle.fromDegrees(-180, -198, 396, 90),
+  numberOfLevelZeroTilesX: 2,
+  numberOfLevelZeroTilesY: 1
+});
 
 const viewer = new Cesium.Viewer('globe', {
   imageryProvider: new Cesium.WebMapTileServiceImageryProvider({
@@ -232,7 +241,7 @@ const viewer = new Cesium.Viewer('globe', {
     style: 'default',
     format: 'image/jpeg',
     tileMatrixSetID: '500m',
-    tilingScheme: new Cesium.GeographicTilingScheme(),
+    tilingScheme: gibsTilingScheme,
     maximumLevel: 7, // NASA公式(nasa-gibs/gibs-ml)のレベル対応表で500mセットの実在最大は level 7
     credit: new Cesium.Credit('NASA EOSDIS GIBS / Blue Marble Next Generation')
   }),
@@ -265,7 +274,7 @@ const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
       style: 'default',
       format: 'image/jpeg',
       tileMatrixSetID: '250m',
-      tilingScheme: new Cesium.GeographicTilingScheme(),
+      tilingScheme: gibsTilingScheme,
       maximumLevel: 8, // NASA公式(nasa-gibs/gibs-ml)のレベル対応表で250mセットの実在最大は level 8。公式wikiのTILEMATRIX=6実例とも整合
       credit: new Cesium.Credit('NASA EOSDIS GIBS / MODIS Terra Corrected Reflectance (' + dateStr + ')')
     });
