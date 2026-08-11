@@ -217,16 +217,11 @@
 // Ion トークン不要の構成にする（オフライン地形＋PDのNatural Earth基図）
 Cesium.Ion.defaultAccessToken = undefined;
 
-// GIBS(EPSG:4326)の実際のタイルグリッドは素直な -180°〜180°/-90°〜90°(360°×288°)ではなく、
-// -180°〜396°/90°〜-198°(576°×288°)という正方形パディング付きの独自グリッド。
-// NASA公式のGDAL_WMS設定例で確認済み。Cesiumの既定GeographicTilingScheme()はこれを知らず
-// 素直な360°幅で列番号を計算するため、180°Eより東側で列番号がズレて404/400になっていた
-// (実際に落ちていたタイルは計算上ちょうどこのパディング領域と一致した)。
-const gibsTilingScheme = new Cesium.GeographicTilingScheme({
-  rectangle: Cesium.Rectangle.fromDegrees(-180, -198, 396, 90),
-  numberOfLevelZeroTilesX: 2,
-  numberOfLevelZeroTilesY: 1
-});
+// 過去にGIBSの実際のタイルグリッド(576°×288°のパディング付き)に合わせた
+// カスタムタイリングスキームを試したが、地球儀本体のジオメトリ分割と噛み合わず
+// 球面のつなぎ目に放射状の欠けが生じる不具合が実機で確認された。
+// 東経側での一部タイル404/400(パディング境界起因)より見た目の構造的破綻の方が
+// 実害が大きいと判断し、標準のGeographicTilingSchemeに戻している。
 
 const viewer = new Cesium.Viewer('globe', {
   imageryProvider: new Cesium.WebMapTileServiceImageryProvider({
@@ -237,7 +232,7 @@ const viewer = new Cesium.Viewer('globe', {
     style: 'default',
     format: 'image/jpeg',
     tileMatrixSetID: '500m',
-    tilingScheme: gibsTilingScheme,
+    tilingScheme: new Cesium.GeographicTilingScheme(),
     maximumLevel: 7, // NASA公式(nasa-gibs/gibs-ml)のレベル対応表で500mセットの実在最大は level 7
     credit: new Cesium.Credit('NASA EOSDIS GIBS / Blue Marble Next Generation')
   }),
@@ -270,7 +265,7 @@ const scene = viewer.scene, globe = scene.globe, camera = viewer.camera;
       style: 'default',
       format: 'image/jpeg',
       tileMatrixSetID: '250m',
-      tilingScheme: gibsTilingScheme,
+      tilingScheme: new Cesium.GeographicTilingScheme(),
       maximumLevel: 8, // NASA公式(nasa-gibs/gibs-ml)のレベル対応表で250mセットの実在最大は level 8。公式wikiのTILEMATRIX=6実例とも整合
       credit: new Cesium.Credit('NASA EOSDIS GIBS / MODIS Terra Corrected Reflectance (' + dateStr + ')')
     });
