@@ -89,6 +89,28 @@ Cesium.js自体が読み込めないため実質何も検証できない(実際�
 - Graphify(ユーザー独自のコード知識グラフツール、BacklogBotByClaudeCode由来)は
   このclaude.aiチャット環境からは接続手段が無い(MCPレジストリに無し)。
 
+## コード知識グラフ (Graphify)
+
+`graphify-out/graph.json` + `graph.html` を同梱している(PyPIパッケージ名は `graphifyy`、
+コマンド名は `graphify`。名前が紛らわしいので注意)。
+
+- `index.html` には専用のHTML抽出器が無く、素で渡すと`document`扱いになりLLM意味解析
+  (要APIキー)経路に回されて何も抽出されない。そのため `<script>` 内のインラインJSだけを
+  `.graphify-src/orbit.js` に抜き出し、tree-sitterベースのAST抽出(`extract_js`、LLM不要・
+  完全ローカル)にかけている。
+- 再生成する場合:
+  ```bash
+  uv tool install graphifyy   # 未インストールなら
+  # index.htmlの<script>ブロックを .graphify-src/orbit.js に抽出してから
+  # graphify.extract / build / cluster / export の各関数を直接呼ぶ
+  # (CLI単体では完結せず、Pythonライブラリとして呼ぶ必要がある。
+  #  詳細は過去のコミット差分か、~/.claude/skills/graphify/SKILL.md を参照)
+  ```
+- `graphify-out/cache/` はキャッシュなので `.gitignore` 済み。`graph.json`/`graph.html` のみ追跡。
+- `GRAPH_REPORT.md`(god nodes等のレポート)は生成に内部の中間データ(cohesion_scores等)が
+  多数必要で、CLIの`graphify install`で入る `/graphify` スキル経由でないと素直には作れなかった
+  ため今回は省略している。
+
 ## 開発フロー
 
 - `dev` ブランチで直接作業、GitHub Pagesも `dev` から配信(pushで自動反映、数十秒〜数分)
