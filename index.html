@@ -215,6 +215,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 import { geoToEcef, WGS84_A } from './src/geo.js';
+import { Transforms } from './src/math.js';
 import { createEarth, loadBaseTexture } from './src/earth.js';
 import { createAtmosphere } from './src/atmosphere.js';
 import { createLighting, updateSunLight } from './src/lighting.js';
@@ -711,6 +712,18 @@ function animate(nowMs) {
 
   const geo = issTracker.geoAt(Date.now());
   if (geo) issLayer.update(geo);
+
+  // ISS実モデル(選択中のみ表示)の位置・姿勢更新。issLayerの点/線は毎フレーム更新して
+  // いたのに、issModelは読み込み後に一度も位置を設定していなかった(=原点=地球中心付近に
+  // 張り付いたまま地球本体に埋もれて見えなくなっていた不具合)。
+  if (issModel && issModel.visible) {
+    const issPos = issTracker.positionAt(Date.now());
+    if (issPos) {
+      const m = Transforms.headingPitchRollToFixedFrame(issPos, issTracker.heading, 0, 0);
+      issModel.matrix.fromArray(m);
+      issModel.matrix.decompose(issModel.position, issModel.quaternion, issModel.scale);
+    }
+  }
 
   renderer.render(scene, cam);
 }
