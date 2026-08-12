@@ -105,7 +105,7 @@ function gibsDate() {
   return toISODate(new Date(Date.now() - 2 * 86400000));
 }
 
-module.exports = {
+export {
   createClock, addSeconds,
   formatJST, formatJSTShort, toISODate, gibsDate,
 };

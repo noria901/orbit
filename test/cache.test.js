@@ -1,5 +1,5 @@
-const assert = require('node:assert/strict');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import test from 'node:test';
 
 // Mock localStorage for Node.js
 const store = {};
@@ -9,10 +9,10 @@ globalThis.localStorage = {
   removeItem(k) { delete store[k]; },
 };
 
-const {
+import {
   lsGet, lsSet, lsDel,
   createBackoff, createTimestampGate, probeKey,
-} = require('../src/cache');
+} from '../src/cache.js';
 
 test('lsGet/lsSet round-trip', () => {
   lsSet('test1', { a: 1 });

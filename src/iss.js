@@ -11,7 +11,7 @@
 
 'use strict';
 
-const { geoToEcef } = require('./geo');
+import { geoToEcef } from './geo.js';
 
 const ISS_R = 6371 + 408;  // mean orbit radius in km (surface + altitude)
 
@@ -138,4 +138,4 @@ function createISSTracker() {
   };
 }
 
-module.exports = { createISSTracker, forwardAzimuth, ISS_R };
+export { createISSTracker, forwardAzimuth, ISS_R };

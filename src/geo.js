@@ -66,7 +66,7 @@ function ecefToGeo(x, y, z, result = {}) {
   return result;
 }
 
-module.exports = {
+export {
   WGS84_A,
   WGS84_F,
   WGS84_E2,

@@ -1,7 +1,7 @@
-const assert = require('node:assert/strict');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import test from 'node:test';
 
-const { classify, parseTLE, buildCategoryIndex, CATEGORIES } = require('../src/catalogue');
+import { classify, parseTLE, buildCategoryIndex, CATEGORIES } from '../src/catalogue.js';
 
 test('classify identifies known categories', () => {
   assert.equal(classify('QZS-1R (MICHIBIKI-1)'), 'qzss');

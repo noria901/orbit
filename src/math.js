@@ -275,7 +275,7 @@ function toDegrees(radians) { return radians * RAD; }
 
 // ---------- Exports ----------
 
-module.exports = {
+export {
   Vec3, Mat3, Mat4, Quat, Transforms,
   toRadians, toDegrees, DEG, RAD,
 };

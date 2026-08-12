@@ -147,7 +147,7 @@ function buildCategoryIndex(records) {
 
 // ---------- Exports ----------
 
-module.exports = {
+export {
   CATEGORIES, CATEGORY_KEYS,
   classify, parseTLE, buildSatrecs,
   propagateToECEF, propagateToGeo,

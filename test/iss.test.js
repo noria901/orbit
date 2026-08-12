@@ -1,7 +1,7 @@
-const assert = require('node:assert/strict');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import test from 'node:test';
 
-const { createISSTracker, forwardAzimuth } = require('../src/iss');
+import { createISSTracker, forwardAzimuth } from '../src/iss.js';
 
 const EPSILON = 1e-6;
 function near(a, b, eps = EPSILON) { return Math.abs(a - b) < eps; }

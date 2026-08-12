@@ -1,0 +1,17 @@
+{
+  "name": "orbit",
+  "version": "2.0.0",
+  "description": "宇宙から地球を眺めて、寄っていけるオープンデータ・デジタルツイン。Three.js + 実測/計算を明示的に区別する観測レイヤ群。",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/noria901/orbit.git"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.170.0"
+  }
+}

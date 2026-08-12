@@ -1,7 +1,7 @@
-const assert = require('node:assert/strict');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import test from 'node:test';
 
-const { ecefToGeo, geoToEcef, WGS84_A } = require('../src/geo');
+import { ecefToGeo, geoToEcef, WGS84_A } from '../src/geo.js';
 
 test('geoToEcef matches the WGS84 equator origin', () => {
   const point = geoToEcef(0, 0);

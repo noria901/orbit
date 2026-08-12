@@ -1,8 +1,8 @@
-const assert = require('node:assert/strict');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import test from 'node:test';
 
-const { Vec3, Mat3, Mat4, Quat, Transforms, toRadians, toDegrees } = require('../src/math');
-const { geoToEcef } = require('../src/geo');
+import { Vec3, Mat3, Mat4, Quat, Transforms, toRadians, toDegrees } from '../src/math.js';
+import { geoToEcef } from '../src/geo.js';
 
 const EPSILON = 1e-9;
 function near(a, b, eps = EPSILON) { return Math.abs(a - b) < eps; }

@@ -7,7 +7,7 @@
 
 'use strict';
 
-const { lsGet, lsSet, TTL, createBackoff, BACKOFF_MAX, ISS_BACKOFF_MAX } = require('./cache');
+import { lsGet, lsSet, TTL, createBackoff, BACKOFF_MAX, ISS_BACKOFF_MAX } from './cache.js';
 
 // ---------- WMO weather code table ----------
 
@@ -209,7 +209,7 @@ async function fetchTLE() {
 
 // ---------- Exports ----------
 
-module.exports = {
+export {
   WMO_CODES, backoffs,
   fetchQuakes, parseQuakes, depthColor,
   fetchAmedasMeta, fetchAmedas, parseAmedas, tempColor,

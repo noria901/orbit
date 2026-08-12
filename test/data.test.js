@@ -1,5 +1,5 @@
-const assert = require('node:assert/strict');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import test from 'node:test';
 
 // Mock localStorage
 const store = {};
@@ -9,7 +9,7 @@ globalThis.localStorage = {
   removeItem(k) { delete store[k]; },
 };
 
-const { parseQuakes, depthColor, parseAmedas, tempColor, WMO_CODES } = require('../src/data');
+import { parseQuakes, depthColor, parseAmedas, tempColor, WMO_CODES } from '../src/data.js';
 
 test('parseQuakes extracts features correctly', () => {
   const geojson = {

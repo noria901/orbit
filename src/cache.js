@@ -129,7 +129,7 @@ function createElevationCache() {
 
 // ---------- Exports ----------
 
-module.exports = {
+export {
   LS_PREFIX,
   lsGet, lsSet, lsDel,
   TTL, BACKOFF_MAX, ISS_BACKOFF_MAX,

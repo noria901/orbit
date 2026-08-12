@@ -1,7 +1,7 @@
-const assert = require('node:assert/strict');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import test from 'node:test';
 
-const { addSeconds, toISODate, gibsDate } = require('../src/time');
+import { addSeconds, toISODate, gibsDate } from '../src/time.js';
 
 test('addSeconds adds correctly', () => {
   const base = new Date('2024-01-01T00:00:00Z');
