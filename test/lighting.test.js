@@ -28,3 +28,21 @@ test('sunDirectionECEF is roughly opposite at 6-month offset', () => {
   assert.ok(june.z > 0.3, `expected positive (northern summer) declination, got ${june.z}`);
   assert.ok(december.z < -0.3, `expected negative (southern summer) declination, got ${december.z}`);
 });
+
+// ---- createLighting: real THREE light construction ----
+import * as THREE from 'three';
+import { createLighting, updateSunLight } from '../src/lighting.js';
+
+test('createLighting returns a DirectionalLight + AmbientLight', () => {
+  const { sunLight, ambientLight } = createLighting(THREE);
+  assert.equal(sunLight.type, 'DirectionalLight');
+  assert.equal(ambientLight.type, 'AmbientLight');
+});
+
+test('updateSunLight positions the light along the real sun direction, scaled by radius', () => {
+  const { sunLight } = createLighting(THREE);
+  const equatorialRadius = 6378137;
+  updateSunLight(THREE, sunLight, equatorialRadius, new Date('2026-06-21T00:00:00Z'));
+  const dist = sunLight.position.length();
+  assert.ok(Math.abs(dist - equatorialRadius * 20) < 1, `expected light at 20x radius, got ${dist}`);
+});

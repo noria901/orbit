@@ -40,6 +40,9 @@ function createControls(domElement, options = {}) {
     initialDistance = minDistance * 10,
     rotateSpeed = 0.003, zoomSpeed = 0.1, inertia = 0.92,
     onInteract = () => {},
+    // pointermove/pointerupはドラッグ中にポインタがcanvas外へ出ても追跡できるよう
+    // windowレベルで購読する。テスト時はフェイクのwindow相当オブジェクトを注入できる。
+    windowLike = typeof window !== 'undefined' ? window : null,
   } = options;
 
   const state = {
@@ -72,8 +75,8 @@ function createControls(domElement, options = {}) {
   }
 
   domElement.addEventListener('pointerdown', onPointerDown);
-  window.addEventListener('pointermove', onPointerMove);
-  window.addEventListener('pointerup', onPointerUp);
+  windowLike?.addEventListener('pointermove', onPointerMove);
+  windowLike?.addEventListener('pointerup', onPointerUp);
   domElement.addEventListener('wheel', onWheel, { passive: false });
 
   /** Apply idle-rotation inertia; call once per frame when not dragging. */
@@ -88,8 +91,8 @@ function createControls(domElement, options = {}) {
 
   function dispose() {
     domElement.removeEventListener('pointerdown', onPointerDown);
-    window.removeEventListener('pointermove', onPointerMove);
-    window.removeEventListener('pointerup', onPointerUp);
+    windowLike?.removeEventListener('pointermove', onPointerMove);
+    windowLike?.removeEventListener('pointerup', onPointerUp);
     domElement.removeEventListener('wheel', onWheel);
   }
 

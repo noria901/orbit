@@ -35,3 +35,16 @@ test('quakesToRenderItems preserves magnitude/place/time metadata', () => {
 test('quakesToRenderItems handles empty feature list', () => {
   assert.deepEqual(quakesToRenderItems({ features: [] }), []);
 });
+
+// ---- createQuakeLayer: real THREE point cloud rendering ----
+import * as THREE from 'three';
+import { createQuakeLayer } from '../src/quakes.js';
+
+test('createQuakeLayer.render populates the mesh and DOM-facing counts', () => {
+  const layer = createQuakeLayer(THREE, 500);
+  const result = layer.render(sampleGeojson);
+  assert.equal(result.total, 2);
+  assert.equal(result.shown, 2);
+  assert.equal(layer.mesh.geometry.drawRange.count, 2);
+  assert.equal(layer.items.length, 2);
+});

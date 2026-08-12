@@ -37,8 +37,8 @@ function createOrbitTrack(THREE, color = 0xFFC94D) {
   line.name = 'orbit-track';
   line.frustumCulled = false;
 
-  function draw(satrec, satelliteLib, startMs = Date.now()) {
-    const pts = sampleGroundTrack(satrec, satelliteLib, startMs);
+  function draw(satrec, satelliteLib, startMs = Date.now(), steps = 288) {
+    const pts = sampleGroundTrack(satrec, satelliteLib, startMs, steps);
     if (pts.length < 6) return false;
     geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts), 3));
     geom.setDrawRange(0, pts.length / 3);

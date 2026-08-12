@@ -11,7 +11,7 @@
     "url": "git+https://github.com/noria901/orbit.git"
   },
   "license": "MIT",
-  "dependencies": {
+  "devDependencies": {
     "three": "^0.170.0"
   }
 }

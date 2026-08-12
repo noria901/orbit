@@ -1,58 +1,68 @@
 # ORBIT — 地球観測
 
 宇宙から地球を眺めて、寄っていけるオープンデータ・デジタルツイン。
-CesiumJS + 実測/計算を明示的に区別する観測レイヤ群。
+Three.js + 実測/計算を明示的に区別する観測レイヤ群。
 
-**Live**: https://noria901.github.io/orbit/ *(GitHub Pages を `dev` ブランチから配信)*
+**Live**: https://noria901.github.io/orbit/ *(現時点の本番配信は `dev` ブランチ=Cesium版。
+このブランチ `migration/threejs-backend` はThree.jsへの移行作業中)*
 
 ## レイヤ
 
 | レイヤ | 種別 | データ源 | 更新 |
 |---|---|---|---|
 | ISS | 実測 | [wheretheiss.at](https://wheretheiss.at/) | 5秒ポーリング(タブ表示中のみ) |
-| 衛星カタログ(Starlink/GPS/GLONASS/Galileo/北斗/みちびき/OneWeb/Iridium/気象衛星/宇宙ステーション/その他 ≒1.2万機) | 計算(SGP4) | [CelesTrak](https://celestrak.org/) GP/TLE `GROUP=active` | GitHub Actions が3時間ごとに取得・コミット |
+| 衛星カタログ(Starlink/GPS/GLONASS/Galileo/北斗/みちびき/OneWeb/Iridium/気象衛星/宇宙ステーション/その他 ≒1.6万機) | 計算(SGP4) | [CelesTrak](https://celestrak.org/) GP/TLE `GROUP=active` | GitHub Actions が3時間ごとに取得・コミット |
 | 地震(24h, M2.5+) | 実測 | [USGS Earthquake Hazards Program](https://earthquake.usgs.gov/) (Public Domain) | 4分キャッシュ + 失敗時バックオフ |
 | アメダス実況 | 実測 | 気象庁 bosai JSON(非公式・政府標準利用規約) | 観測局のタイムスタンプが更新された時のみ再取得 |
 | 地点プローブ | 実測 | [Open-Meteo](https://open-meteo.com/)(CC BY 4.0) | クリック時、0.01°丸めで10分キャッシュ |
-| 基図 | — | Cesium同梱 Natural Earth II(Public Domain) | 静的 |
+| 基図 | — | Blue Marble 2002(Wikimedia Commons、Public Domain) | 静的1枚画像 |
 
-## 選択時のフライイン + 近接概形
+## アーキテクチャ(Three.js版)
 
-ISSまたはカタログ衛星をクリックすると、カメラがその対象へ2.4秒かけて接近し、以後は対象の動きに追従する。
-8,000mより近づくとドット表示から立体形状に切り替わる:
+CesiumJSへの依存を撤去し、Three.jsを基盤にした自前の3D地球儀・観測レイヤ描画に移行した
+(詳細: [Issue #2](https://github.com/noria901/orbit/issues/2))。
 
-- **ISS**: 選択と同時に[NASA VTAD制作の実glTFモデル](https://science.nasa.gov/resource/international-space-station-3d-model/)(約42MB、Public Domain)を遅延読み込み。読み込み完了までと、CORS等で失敗した場合は実寸比の代表ボックス形状(全長109m×パネル展張73m)で継続表示。姿勢は実測lat/lonの逐次差分から算出した進行方位(forward azimuth)で決定。
-- **カタログ衛星**: 個体ごとの正確なCADモデルは存在しないため、本体(2m級)+太陽電池パネルの簡略化した代表シルエットを表示。進行方向はSGP4伝播から得た速度ベクトルで自動配向。
+- `index.html` — シーン初期化・データ取得ループ・UI配線をまとめた薄いエントリポイント
+- `src/*.js` — 描画・データ・数学ロジックを機能単位に分割したESモジュール。ビルドステップ無しで
+  ブラウザに直接読み込まれる(`<script type="module">` + `importmap`)。同じファイルを
+  Node組み込みテストランナー(`node --test`)でも実行できる
+- `test/*.test.js` — 各モジュールに対応するユニットテスト。純粋ロジック(座標変換・SGP4伝播の
+  ラップ・カメラ数学など)は完全に検証、Three.js依存部分(ジオメトリ/マテリアル構築)も
+  実際のThree.jsオブジェクトを使って検証している
 
-## なぜ CelesTrak を直接ブラウザから叩かないか
+### モジュール一覧
 
-CelesTrak の `gp.php` エンドポイントは CORS ヘッダーを返さない(確認済み: `Access-Control-Allow-Origin` なし)。
-ブラウザから直接 fetch すると失敗するため、GitHub Actions(ブラウザではないので CORS 制約を受けない)が
-サーバー側で取得し、`data/active.tle` として同一オリジンにコミットする構成にしている。
+| モジュール | 役割 |
+|---|---|
+| `geo.js` | WGS84 ⇄ ECEF 座標変換 |
+| `math.js` | Vec3/Mat3/Mat4/Quat、Cesiumの`Transforms`相当のENUフレーム計算 |
+| `time.js` | 時刻ユーティリティ |
+| `cache.js` | localStorageキャッシュ + 指数バックオフ |
+| `catalogue.js` | TLEパース・カテゴリ分類・SGP4ラッパー |
+| `data.js` | 地震/アメダス/ISS/地点プローブ/TLEのfetch層 |
+| `iss.js` | ISS推測航法(大圏航法による位置予測) |
+| `earth.js` | WGS84楕円体メッシュ + テクスチャ読込 |
+| `atmosphere.js` | 大気グローシェーダ |
+| `lighting.js` | 太陽方向計算(簡易Meeus法) + 昼夜ライティング |
+| `controls.js` | 球面座標ベースの手動カメラ操作(ドラッグ/ホイール) |
+| `camera-rig.js` | flyToアニメーション + 高速移動対象への自前追従 |
+| `points.js` | Points(点群)汎用ヘルパー |
+| `quakes.js` / `amedas-layer.js` / `satellites-layer.js` / `iss-layer.js` | 各観測レイヤの描画 |
+| `orbits.js` | 軌道地上投影線(準天頂軌跡など) |
+| `picker.js` | 画面投影距離での点群ピッキング + 地表Raycaster |
+| `model-loader.js` | ISS glTFモデルの遅延ロード・重心オフセット補正・失敗時フォールバック |
 
-これは CelesTrak の [Usage Policy](https://celestrak.org/NORAD/documentation/) が明示する
+### 開発
 
-> Only download the data you need, when you are going to use it, and only download data once per update.
-
-にも合致する — 訪問者が何人いようと CelesTrak への実際のリクエストは3時間に1回、Actions からのみ発生する。
-
-## キャッシュ
-
-`localStorage` に前回の観測結果(地震・アメダス・地点プローブ・TLEカタログ)を保存し、再訪時は
-TTL 内ならネットワークに一切出ずに即座に復元描画する。ブラウザの devtools → Application → Local Storage
-で `orbit:` プレフィックスのキーを見れば、何がいつキャッシュされたか確認できる。
-
-## 開発
-
+```bash
+node --test          # 全テスト実行
 ```
-main  … 安定版
-dev   … 開発ブランチ(Pages配信元、ここに直接push)
-```
 
-`.github/workflows/fetch-tle.yml` は手動実行(workflow_dispatch)も可能。
+ローカルでブラウザ実行を試す場合、`three`と`satellite.js`は外部CDN
+(jsdelivr / cdnjs)から読み込む構成になっている。オフラインや制限されたネットワーク環境では
+`npm install three satellite.js` した上で `index.html` の `importmap` と `<script>` タグを
+一時的にローカルパスへ差し替えるとよい(コミットはしないこと)。
 
 ## ライセンス
 
-コード: MIT (LICENSE参照)
-データ: 各レイヤの出典元ライセンスに従う(上表参照)。このリポジトリ自体はデータを再配布する目的ではなく、
-定期スナップショットをビューアが読むためだけに保持している。
+コード: MIT。データは各レイヤの出典元ライセンスに従う(上表参照)。

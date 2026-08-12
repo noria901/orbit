@@ -475,8 +475,17 @@ function selectISS(mx, my) {
   btnIss.textContent = '追尾を解除'; btnIss.classList.add('home');
 }
 
+// ドラッグ直後のクリックを抑制する。controls.state.draggingはpointerupで即falseに
+// 戻ってしまい、その後ブラウザが合成するclickイベントの時点では既にfalseになっている
+// ため、それだけでは判定できない(実機テストで実際にドラッグ後の誤ピッキングを確認)。
+// pointermoveで独立にフラグを立て、pointerdownでリセットする形にする。
+let clickSuppressed = false;
+renderer.domElement.addEventListener('pointerdown', () => { clickSuppressed = false; });
+renderer.domElement.addEventListener('pointermove', () => { clickSuppressed = true; });
+renderer.domElement.addEventListener('click', (e) => { if (clickSuppressed) e.stopImmediatePropagation(); }, true);
+
 renderer.domElement.addEventListener('click', async (e) => {
-  if (controls.state.dragging) return;
+  if (clickSuppressed) return;
   const mx = e.clientX, my = e.clientY;
 
   const candidates = [];

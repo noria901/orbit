@@ -37,3 +37,15 @@ test('amedasToRenderItems includes optional wind/rain/humidity only when quality
   assert.equal(items[0].rain, null); // flagged bad (1), excluded
   assert.equal(items[0].hum, 55);
 });
+
+// ---- createAmedasLayer: real THREE point cloud rendering ----
+import * as THREE from 'three';
+import { createAmedasLayer } from '../src/amedas-layer.js';
+
+test('createAmedasLayer.render populates the mesh, skipping bad-quality stations', () => {
+  const layer = createAmedasLayer(THREE, 2000);
+  const obs = { '44132': { temp: [25.3, 0] }, '99999': { temp: [10.0, 1] } };
+  const result = layer.render(obs, meta);
+  assert.equal(result.total, 1);
+  assert.equal(layer.mesh.geometry.drawRange.count, 1);
+});

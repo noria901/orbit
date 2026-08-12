@@ -31,3 +31,20 @@ test('sampleGroundTrack default step count covers ~24h at 5-minute spacing', () 
   const pts = sampleGroundTrack({}, makeStubLib(), Date.now());
   assert.equal(pts.length, (288 + 1) * 3);
 });
+
+// ---- createOrbitTrack: real THREE line rendering ----
+import * as THREE from 'three';
+import { createOrbitTrack } from '../src/orbits.js';
+
+test('createOrbitTrack.draw uploads a polyline with the sampled point count', () => {
+  const track = createOrbitTrack(THREE);
+  const ok = track.draw({}, makeStubLib(), Date.now(), 10);
+  assert.equal(ok, true);
+  assert.equal(track.line.geometry.drawRange.count, 11); // steps+1
+});
+
+test('createOrbitTrack.draw returns false and leaves geometry unset on total failure', () => {
+  const track = createOrbitTrack(THREE);
+  const ok = track.draw({}, makeStubLib({ fails: true }), Date.now(), 10);
+  assert.equal(ok, false);
+});
