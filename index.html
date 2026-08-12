@@ -358,6 +358,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05070C);
 
 const cam = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 100, 1e9);
+cam.up.set(0, 0, 1); // Z-up to match ECEF coordinate system
 cam.position.set(0, 0, 34000000);
 cam.lookAt(0, 0, 0);
 
@@ -378,26 +379,32 @@ const earthGeom = new THREE.SphereGeometry(1, 64, 64);
 {
   const pos = earthGeom.getAttribute('position');
   for (let i = 0; i < pos.count; i++)
-    pos.setXYZ(i, pos.getX(i) * WGS84_A, pos.getY(i) * WGS84_A, pos.getZ(i) * WGS84_B);
+    pos.setXYZ(i, pos.getX(i) * WGS84_A, pos.getY(i) * WGS84_B, pos.getZ(i) * WGS84_A);
   pos.needsUpdate = true;
   earthGeom.computeVertexNormals();
 }
-const earthMat = new THREE.MeshPhongMaterial({ color: 0x1a3a5c, shininess: 15 });
+const earthMat = new THREE.MeshPhongMaterial({ color: 0xcccccc, shininess: 15, emissive: 0x334455, emissiveIntensity: 0.35 });
 const earth = new THREE.Mesh(earthGeom, earthMat);
 earth.name = 'earth';
+earth.rotation.x = -Math.PI / 2; // SphereGeometry Y-up → ECEF Z-up
 scene.add(earth);
 
 // Load base texture
 {
   const loader = new THREE.TextureLoader();
+  loader.crossOrigin = 'anonymous';
   loader.load('https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/Blue_Marble_2002.png/1280px-Blue_Marble_2002.png', tex => {
     tex.colorSpace = THREE.SRGBColorSpace;
     earthMat.map = tex;
+    earthMat.emissiveMap = tex;
     earthMat.color.set(0xffffff);
     earthMat.needsUpdate = true;
+    console.info('[orbit] テクスチャ読込完了', tex.image.width, 'x', tex.image.height);
     // Remove boot overlay once texture loads
     const b = document.getElementById('boot');
     if (b) { b.style.opacity = 0; setTimeout(() => b.remove(), 1200); }
+  }, undefined, err => {
+    console.error('[orbit] テクスチャ読込エラー', err);
   });
 }
 
@@ -432,7 +439,7 @@ scene.add(new THREE.Mesh(atmoGeom, atmoMat));
 // ---- Sun light ----
 const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
 sunLight.name = 'sunLight';
-const ambientLight = new THREE.AmbientLight(0x404060, 0.15);
+const ambientLight = new THREE.AmbientLight(0x404060, 0.4);
 scene.add(sunLight);
 scene.add(ambientLight);
 
@@ -1033,7 +1040,7 @@ document.querySelectorAll('.lyr').forEach(el => {
     if (k === 'track') trackLine.visible = on;
     if (k === 'quake') quakeCloud.mesh.visible = on;
     if (k === 'amedas') amedasCloud.mesh.visible = on;
-    if (k === 'night') { sunLight.intensity = on ? 1.5 : 0; ambientLight.intensity = on ? 0.15 : 1.0; }
+    if (k === 'night') { sunLight.intensity = on ? 1.5 : 0; ambientLight.intensity = on ? 0.4 : 1.0; }
     // Individual satellite categories: hide by moving offscreen (no per-category mesh)
     // For simplicity, toggle entire satellite cloud visibility when any sat category is toggled
     if (CAT[k]) {
