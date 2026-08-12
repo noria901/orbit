@@ -1,7 +1,7 @@
 # ORBIT — 地球観測
 
 宇宙から地球を眺めて、寄っていけるオープンデータ・デジタルツイン。
-CesiumJS + 実測/計算を明示的に区別する観測レイヤ群。
+Three.js + 実測/計算を明示的に区別する観測レイヤ群。
 
 **Live**: https://noria901.github.io/orbit/ *(GitHub Pages を `dev` ブランチから配信)*
 
@@ -14,7 +14,7 @@ CesiumJS + 実測/計算を明示的に区別する観測レイヤ群。
 | 地震(24h, M2.5+) | 実測 | [USGS Earthquake Hazards Program](https://earthquake.usgs.gov/) (Public Domain) | 4分キャッシュ + 失敗時バックオフ |
 | アメダス実況 | 実測 | 気象庁 bosai JSON(非公式・政府標準利用規約) | 観測局のタイムスタンプが更新された時のみ再取得 |
 | 地点プローブ | 実測 | [Open-Meteo](https://open-meteo.com/)(CC BY 4.0) | クリック時、0.01°丸めで10分キャッシュ |
-| 基図 | — | Cesium同梱 Natural Earth II(Public Domain) | 静的 |
+| 基図 | — | NASA Blue Marble (Wikipedia Commons, Public Domain) | 静的 |
 
 ## 選択時のフライイン + 近接概形
 
