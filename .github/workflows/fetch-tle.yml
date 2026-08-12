@@ -1,0 +1,73 @@
+name: Fetch TLE
+
+# CelesTrak Usage Policy: "Only download the data you need, when you are
+# going to use it, and only download data once per update." — このワーク
+# フローが唯一の取得主体になることで、訪問者が何人いようと CelesTrak への
+# 負荷は 3 時間に 1 回の Actions 実行分だけに固定される。
+#
+# CelesTrak は gp.php で CORS を無効化しているため、ブラウザから直接は
+# 取得できない。ここで Actions ランナー(ブラウザではない)がサーバー側で
+# 取得し、同一オリジンの静的ファイルとして dev ブランチにコミットする。
+
+on:
+  schedule:
+    - cron: '17 */3 * * *'   # 3時間ごと(毎正時ちょうどを避けて分散)
+  workflow_dispatch: {}       # 手動実行用
+  push:
+    branches: [dev]
+    paths:
+      - '.github/workflows/fetch-tle.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Fetch active satellite catalogue (TLE)
+        run: |
+          set -euo pipefail
+          UA="orbit-viewer/1.0 (+https://github.com/noria901/orbit; contact: via GitHub Issues)"
+          mkdir -p data
+          curl -fsSL -A "$UA" \
+            "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle" \
+            -o data/active.tle
+
+          # 最低限のサニティチェック：空や極端に小さいレスポンスなら失敗させ、
+          # 壊れたデータで上書きコミットしない
+          LINES=$(wc -l < data/active.tle)
+          if [ "$LINES" -lt 3000 ]; then
+            echo "::error::TLE data looks too small ($LINES lines) — aborting commit"
+            exit 1
+          fi
+          echo "fetched $LINES lines"
+
+      - name: Write metadata
+        run: |
+          SATS=$(( $(wc -l < data/active.tle) / 3 ))
+          cat > data/meta.json <<EOF
+          {
+            "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "source": "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle",
+            "group": "active",
+            "satellite_count": $SATS,
+            "licence_note": "CelesTrak GP/TLE data — see https://celestrak.org/NORAD/documentation/ ; fetched once per scheduled Action run per CelesTrak's usage policy, not per site visitor."
+          }
+          EOF
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/active.tle data/meta.json
+          if git diff --cached --quiet; then
+            echo "no changes"
+          else
+            git commit -m "obs: TLE snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push origin dev
+          fi
