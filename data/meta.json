@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-09-19T15:55:20Z",
+  "generated_at": "2026-09-19T23:10:18Z",
   "source": "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle",
   "group": "active",
-  "satellite_count": 16002,
+  "satellite_count": 15995,
   "licence_note": "CelesTrak GP/TLE data — see https://celestrak.org/NORAD/documentation/ ; fetched once per scheduled Action run per CelesTrak's usage policy, not per site visitor."
 }
